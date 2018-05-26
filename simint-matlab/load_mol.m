@@ -1,4 +1,4 @@
-function [Hcore, S, nbf, nelec, nuc_energy, shell_bf_num, shell_bf_offsets] = load_mol(fname)
+function [Hcore, S, nbf, nelec, nuc_energy, shells, nshell, shell_bf_num, shell_bf_offsets] = load_mol(fname)
 % Load and parse a molecule file (a combination of gbs file and xyz file) and return
 % pre-computed core Hamiltonian matrix, overlap matrix and other parameters
 % Hcore : core Hamiltonian matrix
@@ -9,23 +9,21 @@ function [Hcore, S, nbf, nelec, nuc_energy, shell_bf_num, shell_bf_offsets] = lo
 % shell_bf_num : number of basis functions in each shell
 % shell_bf_offsets : index of the first basis function in each shell
 
-	% Parse molecule file
-	% Note: .mol file already has coordinates in units of Bohr
+	% Parse molecule file, .mol file already has coordinates in units of Bohr
+	% Not sure if the negative charge in the .xyz file can be correctly handled
 	shells      = readmol(fname);
 	num_atoms   = max([shells.atom_ind]);
 	atomic_nums = zeros(num_atoms, 1);
 	xcoords     = zeros(num_atoms, 1);
 	ycoords     = zeros(num_atoms, 1);
 	zcoords     = zeros(num_atoms, 1);
-	for i = 1 : length(shells)
+	nshell      = length(shells);
+	for i = 1 : nshell
 		ind = shells(i).atom_ind;
 		atomic_nums(ind) = atomic_num_map(shells(i).atom_sym);
 		xcoords(ind)     = shells(i).x;
 		ycoords(ind)     = shells(i).y;
 		zcoords(ind)     = shells(i).z;
-	end
-	if min(atomic_nums) < 1
-		error('Missing atom information for at least one atom index.');
 	end
 	nelec = sum(atomic_nums);
 	
