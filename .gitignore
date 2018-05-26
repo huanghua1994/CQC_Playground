@@ -1,0 +1,6 @@
+# Object files
+*.o
+
+# MATLAB compiled mex libraries
+*.mexa64
+
