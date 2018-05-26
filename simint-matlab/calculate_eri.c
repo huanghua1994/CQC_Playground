@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <mex.h>
 #include "simint/simint.h"
 
@@ -85,11 +87,13 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
              * NCART(shell[2].am) * NCART(shell[3].am);
 
     plhs[0] = mxCreateDoubleMatrix(size, 1, mxREAL);
-    double *targets = mxGetPr(plhs[0]);
+    double *outputs = mxGetPr(plhs[0]);
+    double *targets = SIMINT_ALLOC(sizeof(double) * size);  // Simint's output buffer need to be aligned
 
     // ncomputed should always be 1 in this code
-    int ncomputed = 
-        simint_compute_eri(&bra_pair, &ket_pair, 0.0, work, targets);
+    int ncomputed = simint_compute_eri(&bra_pair, &ket_pair, 0.0, work, targets);
+
+    memcpy(outputs, targets, sizeof(double) * size);
 
     simint_free_shell(&shell[0]);
     simint_free_shell(&shell[1]);
@@ -98,5 +102,6 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[])
     simint_free_multi_shellpair(&bra_pair);
     simint_free_multi_shellpair(&ket_pair);
     SIMINT_FREE(work);
+    SIMINT_FREE(targets);
     simint_finalize();
 }
