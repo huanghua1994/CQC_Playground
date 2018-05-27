@@ -38,7 +38,7 @@ function [df_tensor, df_nbf] = getDensityFittingTensor(mol_file, df_mol_file)
     tic;
     pqA = zeros(nbf, nbf, df_nbf);
     for i = 1 : nshell
-    for j = 1 : nshell
+    for j = i : nshell
         for k = 1 : df_nshell
             eri = calculate_eri(shells(i), shells(j), df_shells(k), unit_shell);
             
@@ -53,6 +53,9 @@ function [df_tensor, df_nbf] = getDensityFittingTensor(mol_file, df_mol_file)
             ks = df_shell_bf_offset(k);
             ke = df_shell_bf_offset(k + 1) - 1;
             pqA(is:ie, js:je, ks:ke) = eri;
+            
+            eri = permute(eri, [2, 1, 3]);
+            pqA(js:je, is:ie, ks:ke) = eri;
         end
     end
     end
@@ -62,7 +65,7 @@ function [df_tensor, df_nbf] = getDensityFittingTensor(mol_file, df_mol_file)
     tic;
     Jpq = zeros(df_nbf, df_nbf);
     for i = 1 : df_nshell
-    for j = 1 : df_nshell
+    for j = i : df_nshell
         eri = calculate_eri(df_shells(i), unit_shell, df_shells(j), unit_shell);
         
         eri = reshape(eri, df_shell_bf_num(j), df_shell_bf_num(i));
@@ -73,22 +76,29 @@ function [df_tensor, df_nbf] = getDensityFittingTensor(mol_file, df_mol_file)
         js = df_shell_bf_offset(j);
         je = df_shell_bf_offset(j + 1) - 1;
         Jpq(is:ie, js:je) = eri;
+        
+        eri = permute(eri, [2 1]);
+        Jpq(js:je, is:ie) = eri;
     end
     end
     coulomb_metric_mat_time = toc;
 
     % Form the density fitting tensor, combine with Jpq's inverse square root
     tic;
+    pqA0 = permute(pqA, [3 1 2]);
     Jpq_invsqrt = inv(sqrtm(Jpq));
     df_tensor = zeros(nbf, nbf, df_nbf);
     for i = 1 : nbf
-    for j = 1 : nbf
+    for j = i : nbf
+        pqA0_vec = reshape(pqA0(:, i, j), [1, df_nbf]);
         for k = 1 : df_nbf
-            t = 0;
-            for l = 1 : df_nbf
-                t = t + pqA(i, j, l) * Jpq_invsqrt(l, k);
-            end
+            %t = 0;
+            %for l = 1 : df_nbf
+            %    t = t + pqA(i, j, l) * Jpq_invsqrt(l, k);
+            %end
+            t = pqA0_vec * Jpq_invsqrt(:, k);
             df_tensor(i, j, k) = t;
+            df_tensor(j, i, k) = t;
         end
     end
     end
