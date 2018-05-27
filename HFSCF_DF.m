@@ -1,5 +1,5 @@
-function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_tol)
-% Restrict HF-SCF
+function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_iter, ene_delta_tol)
+% Restrict HF-SCF using density fitting
 % mol_file : molecule file
 % max_iter : maximum SCF iteration
 % ene_delta_tol : stop threshold of energy change
@@ -7,10 +7,12 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
 % final_energy  : converged energy, including the nuclear energy
 % energy_delta  : energy change in each step
 
-    if (nargin < 2) max_iter = 20;         end
-    if (nargin < 3) ene_delta_tol = 1e-10; end
+    if (nargin < 3) max_iter = 20;         end
+    if (nargin < 4) ene_delta_tol = 1e-10; end
 
     [Hcore, S, nbf, nelec, nuc_energy, shells, nshell, shell_bf_num, shell_bf_offsets] = load_mol(mol_file);
+    
+    [df_tensor, df_nbf] = getDensityFittingTensor(mol_file, df_mol_file);
     
     n_orb   = nelec / 2;
     scrtol2 = 1e-22;    % Square of shell quartet screening values
@@ -54,7 +56,7 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
     % SCF iterations
     while (energy_delta > ene_delta_tol)
         tic;
-    
+
         % Construct the Fock matrix
         J = zeros(nbf);
         K = zeros(nbf);
@@ -78,8 +80,7 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             
             % Note: calculate_eri returns row-major tensor, MATLAB use column-major, 
             % so the sequence of indices need to be flipped 
-            ERI = calculate_eri(shells(M), shells(N), shells(P), shells(Q));
-            ERI = reshape(ERI, [shell_bf_num(Q) shell_bf_num(P) shell_bf_num(N) shell_bf_num(M)]);
+            ERI = getERITensorFromDFTensor(M, N, P, Q, shell_bf_num, shell_bf_offsets, df_tensor, df_nbf);
             i0  = shell_bf_offsets(M) - 1;
             j0  = shell_bf_offsets(N) - 1;
             k0  = shell_bf_offsets(P) - 1;
@@ -90,7 +91,7 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             for k = shell_bf_offsets(P) : shell_bf_offsets(P + 1) - 1
             for j = shell_bf_offsets(N) : shell_bf_offsets(N + 1) - 1
             for i = shell_bf_offsets(M) : shell_bf_offsets(M + 1) - 1
-                I = ERI(l - l0, k - k0, j - j0, i - i0);
+                I = ERI(i - i0, j - j0, k - k0, l - l0);
                 J(i, j) = J(i, j) + 2 * coef(1) * D(k, l) * I;
                 J(k, l) = J(k, l) + 2 * coef(2) * D(i, j) * I;
                 K(i, k) = K(i, k) - coef(3) * D(j, l) * I;
