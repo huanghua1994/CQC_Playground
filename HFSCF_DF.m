@@ -55,6 +55,9 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
     energy       = nuc_energy;
     iter = 0;
 
+    % Variables end with 0 are the permuted one that runs faster on MATLAB
+    df_tensor0 = permute(df_tensor, [3, 1, 2]);
+    
     % SCF iterations
     while (energy_delta > ene_delta_tol)
         tic;
@@ -65,16 +68,19 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         T_J = zeros(df_nbf, 1);
         for k = 1 : nbf
         for l = 1 : nbf
-            T_J = T_J + DT(l, k) .* reshape(df_tensor(l, k, :), [df_nbf 1]);
+            %T_J = T_J + DT(l, k) .* reshape(df_tensor(l, k, :), [df_nbf 1]);
+            T_J = T_J + DT(l, k) .* reshape(df_tensor0(:, l, k), [df_nbf 1]);
         end
         end
 
-        T_K = zeros(nbf, nbf, df_nbf);
+        % T_K = zeros(nbf, nbf, df_nbf);
+        T_K0 = zeros(df_nbf, nbf, nbf);
         for k = 1 : nbf
         for j = 1 : nbf
         for l = 1 : nbf
             for p = 1 : df_nbf
-                T_K(k, j, p) = T_K(k, j, p) + DT(l, k) * df_tensor(l, j, p);
+                % T_K(k, j, p) = T_K(k, j, p) + DT(l, k) * df_tensor(l, j, p);
+                T_K0(p, k, j) = T_K0(p, k, j) + DT(l, k) * df_tensor0(p, l, j);
             end
         end
         end
@@ -88,7 +94,8 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         for j = i : nbf
             t = 0;
             for p = 1 : df_nbf
-                t = t + T_J(p) * df_tensor(i, j, p);
+                % t = t + T_J(p) * df_tensor(i, j, p);
+                t = t + T_J(p) * df_tensor0(p, i, j);
             end
             J(i, j) = 2 * t;
             J(j, i) = 2 * t;
@@ -101,7 +108,8 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
             t = 0;
             for k = 1 : nbf
             for p = 1 : df_nbf
-                t = t + T_K(k, j, p) * df_tensor(i, k, p);
+                %t = t + T_K(k, j, p) * df_tensor(i, k, p);
+                t = t + T_K0(p, k, j) * df_tensor0(p, i, k);
             end
             end
             K(i, j) = -t;
