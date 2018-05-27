@@ -52,7 +52,7 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
     energy_delta = nuc_energy;
     energy       = nuc_energy;
     iter = 0;
-    
+
     % SCF iterations
     while (energy_delta > ene_delta_tol)
         tic;
@@ -61,54 +61,57 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         J = zeros(nbf);
         K = zeros(nbf);
         
-        % M, N, P, Q are shell quartet indices
-        for M = 1 : nshell
-        for N = 1 : M
-        for P = 1 : M
-        if (P == M) 
-            Qmax = N;
-        else
-            Qmax = P;
-        end
-        for Q = 1 : Qmax
-            % Shell quartet screening
-            MN_scr_val = sq_screen_val(M, N);
-            PQ_scr_val = sq_screen_val(P, Q);
-            if (MN_scr_val * PQ_scr_val < scrtol2) continue; end
+        DT = D';
 
-            coef = unique_integral_coef(M, N, P, Q);
-            
-            % Note: calculate_eri returns row-major tensor, MATLAB use column-major, 
-            % so the sequence of indices need to be flipped 
-            ERI = getERITensorFromDFTensor(M, N, P, Q, shell_bf_num, shell_bf_offsets, df_tensor, df_nbf);
-            i0  = shell_bf_offsets(M) - 1;
-            j0  = shell_bf_offsets(N) - 1;
-            k0  = shell_bf_offsets(P) - 1;
-            l0  = shell_bf_offsets(Q) - 1;
-            
-            % i, j, k, l are basis function indices 
-            for l = shell_bf_offsets(Q) : shell_bf_offsets(Q + 1) - 1
-            for k = shell_bf_offsets(P) : shell_bf_offsets(P + 1) - 1
-            for j = shell_bf_offsets(N) : shell_bf_offsets(N + 1) - 1
-            for i = shell_bf_offsets(M) : shell_bf_offsets(M + 1) - 1
-                I = ERI(i - i0, j - j0, k - k0, l - l0);
-                J(i, j) = J(i, j) + 2 * coef(1) * D(k, l) * I;
-                J(k, l) = J(k, l) + 2 * coef(2) * D(i, j) * I;
-                K(i, k) = K(i, k) - coef(3) * D(j, l) * I;
-                K(j, k) = K(j, k) - coef(4) * D(i, l) * I;
-                K(i, l) = K(i, l) - coef(5) * D(j, k) * I;
-                K(j, l) = K(j, l) - coef(6) * D(i, k) * I;
+        T_J = zeros(df_nbf, 1);
+        for p = 1 : df_nbf
+            t = 0;
+            for k = 1 : nbf
+            for l = 1 : nbf
+                t = t + DT(l, k) * df_tensor(l, k, p);
             end
             end
+            T_J(p) = t;
+        end
+
+        T_K = zeros(df_nbf, nbf, nbf);
+        for p = 1 : df_nbf
+        for k = 1 : nbf
+        for j = 1 : nbf
+            t = 0;
+            for l = 1 : nbf
+                t = t + DT(l, k) * df_tensor(l, j, p);
             end
-            end
+            T_K(k, j, p) = t;
         end
         end
+        end
+
+        for i = 1 : nbf
+        for j = i : nbf
+            t = 0;
+            for p = 1 : df_nbf
+                t = t + T_J(p) * df_tensor(i, j, p);
+            end
+            J(i, j) = 2 * t;
+            J(j, i) = 2 * t;
         end
         end
         
-        J = (J + J') / 2;  % The complete Coulomb matrix
-        K = (K + K') / 2;  % The complete exchange matrix
+
+        for i = 1 : nbf
+        for j = i : nbf
+            t = 0;
+            for p = 1 : df_nbf
+            for k = 1 : nbf
+                t = t + T_K(k, j, p) * df_tensor(i, k, p);
+            end
+            end
+            K(i, j) = -t;
+            K(j, i) = -t;
+        end
+        end
+
         F = Hcore + J + K;
         
         % Calculate energy
