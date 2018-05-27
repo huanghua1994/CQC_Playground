@@ -1,5 +1,7 @@
 function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_iter, ene_delta_tol)
-% Restrict HF-SCF using density fitting
+% Restrict HF-SCF using density fitting\
+% Note: the tensors used in this file are row-major indexing style, 
+% it's slow in MATLAB, but used as a reference for C code
 % mol_file : molecule file
 % max_iter : maximum SCF iteration
 % ene_delta_tol : stop threshold of energy change
@@ -57,35 +59,30 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
     while (energy_delta > ene_delta_tol)
         tic;
 
-        % Construct the Fock matrix
-        J = zeros(nbf);
-        K = zeros(nbf);
-        
+        % Generate the temporary tensor for J and K matrix        
         DT = D';
 
         T_J = zeros(df_nbf, 1);
-        for p = 1 : df_nbf
-            t = 0;
-            for k = 1 : nbf
-            for l = 1 : nbf
-                t = t + DT(l, k) * df_tensor(l, k, p);
-            end
-            end
-            T_J(p) = t;
+        for k = 1 : nbf
+        for l = 1 : nbf
+            T_J = T_J + DT(l, k) .* reshape(df_tensor(l, k, :), [df_nbf 1]);
+        end
         end
 
-        T_K = zeros(df_nbf, nbf, nbf);
-        for p = 1 : df_nbf
+        T_K = zeros(nbf, nbf, df_nbf);
         for k = 1 : nbf
         for j = 1 : nbf
-            t = 0;
-            for l = 1 : nbf
-                t = t + DT(l, k) * df_tensor(l, j, p);
+        for l = 1 : nbf
+            for p = 1 : df_nbf
+                T_K(k, j, p) = T_K(k, j, p) + DT(l, k) * df_tensor(l, j, p);
             end
-            T_K(k, j, p) = t;
         end
         end
         end
+
+        % Calculate J and K matrix using temporary tensor
+        J = zeros(nbf);
+        K = zeros(nbf);
 
         for i = 1 : nbf
         for j = i : nbf
@@ -102,8 +99,8 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         for i = 1 : nbf
         for j = i : nbf
             t = 0;
-            for p = 1 : df_nbf
             for k = 1 : nbf
+            for p = 1 : df_nbf
                 t = t + T_K(k, j, p) * df_tensor(i, k, p);
             end
             end
@@ -112,6 +109,7 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         end
         end
 
+        % Calculate Fock matrix
         F = Hcore + J + K;
         
         % Calculate energy
