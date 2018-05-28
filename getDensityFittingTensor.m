@@ -9,6 +9,7 @@ function [df_tensor, df_nbf] = getDensityFittingTensor(mol_file, df_mol_file)
 
     shells    = readmol(mol_file);
     df_shells = readmol(df_mol_file);
+    df_shells = group_shells_by_AM(df_shells);
     
     nshell    = length(shells);
     df_nshell = length(df_shells);
