@@ -58,6 +58,8 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
     % Variables end with 0 are the permuted one that runs faster on MATLAB
     df_tensor0 = permute(df_tensor, [3, 1, 2]);
     
+    C_occ = zeros(nbf, n_orb);
+
     % SCF iterations
     while (energy_delta > ene_delta_tol)
         tic;
@@ -73,15 +75,15 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         end
         end
 
-        % T_K = zeros(nbf, nbf, df_nbf);
-        T_K0 = zeros(df_nbf, nbf, nbf);
-        for k = 1 : nbf
-        for j = 1 : nbf
-        for l = 1 : nbf
-            for p = 1 : df_nbf
-                % T_K(k, j, p) = T_K(k, j, p) + DT(l, k) * df_tensor(l, j, p);
-                T_K0(p, k, j) = T_K0(p, k, j) + DT(l, k) * df_tensor0(p, l, j);
+        T_K = zeros(nbf, n_orb, df_nbf);
+        for i = 1 : nbf
+        for s = 1 : n_orb
+        for p = 1 : df_nbf
+            t = 0;
+            for k = 1 : nbf 
+                t = t + C_occ(k, s) * df_tensor(i, k, p);
             end
+            T_K(i, s, p) = t;
         end
         end
         end
@@ -106,12 +108,12 @@ function [F, final_energy, energy_delta] = HFSCF_DF(mol_file, df_mol_file, max_i
         for i = 1 : nbf
         for j = i : nbf
             t = 0;
-            for k = 1 : nbf
             for p = 1 : df_nbf
-                %t = t + T_K(k, j, p) * df_tensor(i, k, p);
-                t = t + T_K0(p, k, j) * df_tensor0(p, i, k);
+            for s = 1 : n_orb
+                t = t + T_K(i, s, p) * T_K(j, s, p);
             end
             end
+
             K(i, j) = -t;
             K(j, i) = -t;
         end
