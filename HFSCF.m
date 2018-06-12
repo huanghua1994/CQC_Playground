@@ -50,6 +50,8 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
     energy_delta = nuc_energy;
     energy       = nuc_energy;
     iter = 0;
+
+    use_purif = 1;
     
     % SCF iterations
     while (energy_delta > ene_delta_tol)
@@ -171,17 +173,22 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             F = X' * F * X;
         end
         
-        % Diagonalize F' = C' * epsilon * C
-        [C, E] = eig(F);
+        if (use_purif == 1)
+            [D, ~] = CanonicalPurification(F, nbf, n_orb);
+            D = X * D * X';
+        else   
+            % Diagonalize F' = C' * epsilon * C
+            [C, E] = eig(F);
+            
+            % Form C = X * C', C_{occ} and D
+            [~, index] = sort(diag(E));
+            C = X * C;
+            C_occ = C(:, index(1 : n_orb));
+            
+            % D = C_{occ} * C_{occ}^T
+            D = C_occ * C_occ';
+        end
         
-        % Form C = X * C', C_{occ} and D
-        [~, index] = sort(diag(E));
-        C = X * C;
-        C_occ = C(:, index(1 : n_orb));
-        
-        % D = C_{occ} * C_{occ}^T
-        D = C_occ * C_occ';
-
         iter_time = toc;
         
         fprintf('Iteration %2d, energy = %d, energy delta = %d, time = %f\n', iter, energy, energy_delta, iter_time);
