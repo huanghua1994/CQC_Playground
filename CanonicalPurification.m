@@ -6,7 +6,7 @@ function [D, iter] = CanonicalPurification(F, N, Ne)
 % N    : Size of the Fock matrix
 % Ne   : Number of electron
 
-	% Gershgorin's formula to estimate eigenvalue range
+	% Gerschgorin's formula to estimate eigenvalue range
 	Hmin =  9e99;
 	Hmax = -9e99;
 	for i = 1 : N
