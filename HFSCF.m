@@ -1,4 +1,4 @@
-function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_tol)
+function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_tol, build_density)
 % Restrict HF-SCF
 % mol_file : molecule file
 % max_iter : maximum SCF iteration
@@ -6,9 +6,11 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
 % F : converged Fock matrix
 % final_energy  : converged energy, including the nuclear energy
 % energy_delta  : energy change in each step
+% build_density : 1 == diagonalization, 2 == purification, 3 == SP2  
 
     if (nargin < 2) max_iter = 20;         end
     if (nargin < 3) ene_delta_tol = 1e-10; end
+    if (nargin < 4) build_density = 3;     end
 
     [Hcore, S, nbf, nelec, nuc_energy, shells, nshell, shell_bf_num, shell_bf_offsets] = load_mol(mol_file);
     
@@ -173,10 +175,7 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             F = X' * F * X;
         end
         
-        if (use_purif == 1)
-            [D, ~] = CanonicalPurification(F, nbf, n_orb);
-            D = X * D * X';
-        else   
+        if (build_density == 1)  
             % Diagonalize F' = C' * epsilon * C
             [C, E] = eig(F);
             
@@ -187,6 +186,14 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             
             % D = C_{occ} * C_{occ}^T
             D = C_occ * C_occ';
+        end
+        if (build_density == 2)
+            [D, ~] = CanonicalPurification(F, nbf, n_orb);
+            D = X * D * X';
+        end
+        if (build_density == 3)
+            [D, ~] = SP2(F, nbf, n_orb);
+            D = X * D * X';
         end
         
         iter_time = toc;

@@ -1,27 +1,18 @@
-function [D, iter] = CanonicalPurification(F, N, Ne)
-% Canonical Purification
+function [D, iter] = CanonicalPurification(F, N, Norb)
+% Canonical Purification for buiding density matrix
 % D    : Output density matrix
 % iter : Number of purification iterations
 % F    : Input Fock matrix
 % N    : Size of the Fock matrix
-% Ne   : Number of electron
+% Norb : Number of occupied orbitals, == number of electron / 2
 
 	% Gerschgorin's formula to estimate eigenvalue range
-	Hmin =  9e99;
-	Hmax = -9e99;
-	for i = 1 : N
-		row_abs_sum = sum(abs(F(i, :)));
-		row_abs_sum = row_abs_sum - abs(F(i, i));
-		Hmin0 = F(i, i) - row_abs_sum;
-		Hmax0 = F(i, i) + row_abs_sum;
-		Hmin  = min(Hmin, Hmin0);
-		Hmax  = max(Hmax, Hmax0);
-	end
+	[Hmax, Hmin] = Gerschgorin_MinMax(F);
 
 	% Generate initial guess
 	mu_bar = trace(F) / N;
-	lambda = min(Ne / (Hmax - mu_bar), (N - Ne) / (mu_bar - Hmin));
-	D = (lambda * mu_bar + Ne) / N * eye(N) - lambda / N * F;
+	lambda = min(Norb / (Hmax - mu_bar), (N - Norb) / (mu_bar - Hmin));
+	D = (lambda * mu_bar + Norb) / N * eye(N) - lambda / N * F;
 
 	% Purification iterations
 	max_iter = 200;
