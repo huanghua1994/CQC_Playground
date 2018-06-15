@@ -46,6 +46,4 @@ function [D, iter] = SSNS(F, N, Norb)
 	end
 
 	D = (D + I) ./ 2;
-
-	fprintf('iter = %d, err_norm = %d\n', iter, err_norm);
 end

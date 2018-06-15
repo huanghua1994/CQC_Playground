@@ -199,6 +199,10 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             [D, ~] = SSNS(F, nbf, n_orb);
             D = X * D * X';
         end
+        if (build_density == 5)
+            [D, ~] = McWeenyPurification(F, nbf, n_orb);
+            D = X * D * X';
+        end
         
         iter_time = toc;
         
