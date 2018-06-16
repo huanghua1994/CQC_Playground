@@ -14,14 +14,12 @@ function [D, iter] = McWeenyPurification(F, N, Norb)
 	eigval = diag(S);
 	eigval = sort(eigval);
 	mu = (eigval(Norb) + eigval(Norb + 1)) / 2;
-	F  = mu * I - F;
-	
-	[~, S] = eig(F); 
-	eigval = diag(S);
-	Hmax_abs = max(abs(eigval));
-	Hmin_abs = min(abs(eigval));
-	D = F ./ Hmax_abs;
+	Hmax = max(eigval);  
+	Hmin = min(eigval);  
+	lambda = min(1 / (Hmax - mu), 1 / (mu - Hmin));
+	D  = 0.5 * lambda * (mu * I - F) + 0.5 * I;
 	D2 = D * D;
+	D3 = D * D2;
 
 	% Purification iterations
 	max_iter = 200;
@@ -29,15 +27,12 @@ function [D, iter] = McWeenyPurification(F, N, Norb)
     iter = 0;
 	while ((iter < max_iter) && (can_stop == 0))
 		
-		D = 0.5 * D * (3 * I - D2);
+		D  = 3 * D2 - 2 * D3;
 		D2 = D * D;
-		realD  = (D + I) ./ 2;
-		realD2 = 0.25 * D2 + 0.5 * D + 0.25 * I;
+		D3 = D * D2;
 
 		iter = iter + 1;
-		err_norm = norm(realD - realD2, 'fro');
+		err_norm = norm(D - D2, 'fro');
 		if (err_norm < 1e-11) can_stop = 1; end
 	end
-
-	D = (D + I) ./ 2;
 end
