@@ -37,6 +37,5 @@ function [D, iter] = SP2(F, N, Norb)
 		iter = iter + 1;
 		IdemErr = abs(traceD - traceD2);
 		if (IdemErr < 1e-11) can_stop = 1; end;
-	end
-	iter
+    end
 end
