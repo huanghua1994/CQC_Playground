@@ -10,28 +10,33 @@ function [D, iter] = SP2(F, N, Norb)
 	[Hmax, Hmin] = Gerschgorin_MinMax(F);
 
 	% Generate initial guess
+	I = eye(N);
 	D = (Hmax .* eye(N) - F) ./ (Hmax - Hmin);
 	traceD = trace(D);
-
-	Ne = Norb * 2;
 
 	% SP2 iterations
 	max_iter = 200;
 	can_stop = 0;
     iter = 0;
 	while ((iter < max_iter) && (can_stop == 0))
-		Dtmp = D - D * D;
-		traceDtmp = trace(Dtmp);
-		if (abs(2*traceD - 2*traceDtmp - Ne) > abs(2*traceD + 2*traceDtmp - Ne))
-			D = D + Dtmp;
-			traceD = traceD + traceDtmp;
+		D2 = D * D;
+		traceD2 = trace(D2);
+		tr1 = abs(traceD2 - Norb);
+		tr2 = abs(2*traceD - traceD2 - Norb);
+		if (tr1 > tr2)
+			%D = 2 * D - D2;
+			ID2 = I + D2 - 2 * D;
+			ID4 = ID2 * ID2;
+			D   = I - ID4;
 		else
-			D = D - Dtmp;
-			traceD = traceD - traceDtmp;
+			%D = D2;
+			D = D2 * D2;
 		end
+		traceD = trace(D);
 
 		iter = iter + 1;
-		IdemErr = abs(traceDtmp);
-		if (IdemErr < 1e-12) can_stop = 1; end;
+		IdemErr = abs(traceD - traceD2);
+		if (IdemErr < 1e-11) can_stop = 1; end;
 	end
+	iter
 end
