@@ -20,7 +20,9 @@ end
 top = 1:2:n;
 bot = 2:2:n;
 
+A_norm = norm(A, 'fro');
 V = eye(size(A));
+D = zeros(n, 1);
 %G = A; % conceptually, G=V'*A
 GT = A';
 
@@ -74,9 +76,13 @@ for sweep = 1:10
         bot(end) = top_end;
     end
     tt = toc;
-    fprintf('sweep %2d:  %e, %f\n', sweep, norm(tril(GT' * V,-1),'fro'), tt);
+    for i = 1:n
+        D(i) = GT(:, i)' * V(:, i);
+    end
+    D_norm = norm(D, 2);
+    relres_norm = abs(A_norm - D_norm) / A_norm;
+    
+    fprintf('sweep %2d:  %e, %f\n', sweep, relres_norm, tt);
 end
-D = zeros(n, 1);
-for i = 1:n
-    D(i) = GT(:, i)' * V(:, i);
-end
+
+
