@@ -6,6 +6,8 @@
 #include <time.h>
 #include <omp.h>
 
+#include <mkl.h>
+
 #define MAX(a, b) ((a)>(b))?(a):(b)
 #define MIN(a, b) ((a)<(b))?(a):(b)
 
@@ -155,6 +157,38 @@ void eig_jacobi_onesided(
     }  // End of while (relres_norm > 1e-14) loop 
 }
 
+void test_mkl_qr(double *A, double *A0, double *tau, const int n)
+{
+    // Warm up
+    memcpy(A, A0, sizeof(double) * n * n);
+    LAPACKE_dgeqrfp(LAPACK_ROW_MAJOR, n, n, A, n, tau);
+    
+    for (int i = 0; i < 10; i++)
+    {
+        memcpy(A, A0, sizeof(double) * n * n);
+        double st = omp_get_wtime();
+        LAPACKE_dgeqrfp(LAPACK_ROW_MAJOR, n, n, A, n, tau);
+        double ut = omp_get_wtime() - st;
+        printf("LAPACKE_dgeqrfp %2d: %.3lf (s)\n", i, ut);
+    }
+}
+
+void test_mkl_eig(double *A, double *A0, double *eigval, const int n)
+{
+    // Warm up
+    memcpy(A, A0, sizeof(double) * n * n);
+    LAPACKE_dsyev(LAPACK_ROW_MAJOR, 'V', 'U', n, A, n, eigval);
+    
+    for (int i = 0; i < 10; i++)
+    {
+        memcpy(A, A0, sizeof(double) * n * n);
+        double st = omp_get_wtime();
+        LAPACKE_dsyev(LAPACK_ROW_MAJOR, 'V', 'U', n, A, n, eigval);
+        double ut = omp_get_wtime() - st;
+        printf("LAPACKE_dsyev %2d: %.3lf (s)\n", i, ut);
+    }
+}
+
 int main(int argc, char **argv)
 {
     int n = atoi(argv[1]);
@@ -182,6 +216,9 @@ int main(int argc, char **argv)
     
     memcpy(A, A0, sizeof(double) * n * n);
     eig_jacobi_onesided(A, n, n, V, n, D, nthread, workbuf);
+    
+    test_mkl_qr (A, A0, workbuf, n);
+    test_mkl_eig(A, A0, workbuf, n);
     
     free(A);
     free(A0);
