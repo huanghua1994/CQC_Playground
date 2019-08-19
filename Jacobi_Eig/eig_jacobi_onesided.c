@@ -11,9 +11,73 @@
 #define MAX(a, b) ((a)>(b))?(a):(b)
 #define MIN(a, b) ((a)<(b))?(a):(b)
 
+// Perform a Jacobi roration B = J^T * A * J where J = J(p, q, theta)
+// Input parameters:
+//   nrow   : Number of rows and columns
+//   p, q   : Jacobi rotation index pair
+//   G      : == V' * A, row-major, size >= ldA * nrow
+//   ldG    : Leading dimension of G
+//   V      : Eigenvectors, each row is an eigenvector, size >= ldV * nrow
+//   ldV    : Leading dimension of V
+//   Gp, Gq : Work buffer for storing G(:, p) and G(:, q), size >= nrow
+//   Vp, Vq : Work buffer for storing V(:, p) and V(:, q), size >= nrow 
+// Output parameters:
+//   G, V : The p-th and q-th rows will be updated
+void jacobi_rotation_kernel(
+    const int nrow, const int p, const int q, 
+    double *G, const int ldG, double *V, const int ldV,
+    double *Gp, double *Gq, double *Vp, double *Vq
+)
+{
+    double *Gp_ = G + p * ldG;
+    double *Gq_ = G + q * ldG;
+    double *Vp_ = V + p * ldV;
+    double *Vq_ = V + q * ldV;
+    size_t row_msize = sizeof(double) * nrow;
+    memcpy(Gp, Gp_, row_msize);
+    memcpy(Gq, Gq_, row_msize);
+    memcpy(Vp, Vp_, row_msize);
+    memcpy(Vq, Vq_, row_msize);
+    
+    // Calculate block
+    double App = 0.0, Aqq = 0.0, Apq = 0.0;
+    #pragma omp simd
+    for (int l = 0; l < nrow; l++)
+    {
+        App += Gp[l] * Vp[l];
+        Aqq += Gq[l] * Vq[l];
+        Apq += Gp[l] * Vq[l];
+    }
+    
+    // Calculate J = [c s;-s c] such that J' * Apq * J = diagonal
+    // [c s] = symschur2([app apq; apq aqq]);
+    double c, s, tau, t;
+    if (Apq == 0)
+    {
+        c = 1.0; s = 0.0;
+    } else {
+        tau = (Aqq - App) / (2.0 * Apq);
+        if (tau > 0) t =  1.0 / ( tau + sqrt(1.0 + tau * tau));
+        else         t = -1.0 / (-tau + sqrt(1.0 + tau * tau));
+        c = 1.0 / sqrt(1 + t * t);
+        s = t * c;
+    }
+    
+    // Update G by applying J' on left
+    // Update V by applying J on right
+    #pragma omp simd
+    for (int l = 0; l < nrow; l++)
+    {
+        Gp_[l] = c * Gp[l] - s * Gq[l];
+        Gq_[l] = s * Gp[l] + c * Gq[l];
+        Vp_[l] = c * Vp[l] - s * Vq[l];
+        Vq_[l] = s * Vp[l] + c * Vq[l];
+    }
+}
+
 // Parallel Jacobi method for eigen decompisition
 // Input parameters:
-//   A       : Symmetric matrix to be decomposed, Row-major, 
+//   A       : Symmetric matrix to be decomposed, row-major, 
 //             size >= ldA * nrow, will be overwritten when exit
 //   nrow    : Number of rows and columns
 //   ldA     : Leading dimension of A, size >= nrow
@@ -31,6 +95,8 @@ void eig_jacobi_onesided(
 {
     const int ncol = nrow;
     const int semi_n = nrow / 2;
+    
+    // Set of pairs for elimination, no two pairs has the same element
     int *top = (int*) &workbuf[nthread * 4 * nrow];
     int *bot = top + semi_n;
     for (int i = 0; i < semi_n; i++)
@@ -41,8 +107,7 @@ void eig_jacobi_onesided(
     
     memset(D, 0, sizeof(double) * nrow);
     memset(V, 0, sizeof(double) * ldV * nrow);
-    for (int i = 0; i < nrow; i++)
-        V[i * ldV + i] = 1.0;
+    for (int i = 0; i < nrow; i++) V[i * ldV + i] = 1.0;
     
     double A_2norm = 0.0, D_2norm = 0.0, relres_norm;
     #pragma omp parallel for num_threads(nthread) reduction(+:A_2norm)
@@ -50,17 +115,14 @@ void eig_jacobi_onesided(
     {
         double tmp = 0.0;
         double *A_row = A + i * ldA;
-        for (int j = 0; j < ncol; j++)
-            tmp += A_row[j] * A_row[j];
+        for (int j = 0; j < ncol; j++) tmp += A_row[j] * A_row[j];
         A_2norm += tmp;
     }
     A_2norm = sqrt(A_2norm);
     
     // Conceptually, G = V' * A
     double *G = A;
-    const int ldG = ldA;
-    int sweep = 0;
-    size_t row_msize = sizeof(double) * nrow;
+    int ldG = ldA, sweep = 0;
     relres_norm = fabs(A_2norm - D_2norm) / A_2norm; 
     while (relres_norm > 1e-14)
     {
@@ -83,53 +145,12 @@ void eig_jacobi_onesided(
                     int p = MIN(top[k], bot[k]);
                     int q = MAX(top[k], bot[k]);
                     
-                    double *Gp_ = G + p * ldG;
-                    double *Gq_ = G + q * ldG;
-                    double *Vp_ = V + p * ldV;
-                    double *Vq_ = V + q * ldV;
-                    memcpy(Gp, Gp_, row_msize);
-                    memcpy(Gq, Gq_, row_msize);
-                    memcpy(Vp, Vp_, row_msize);
-                    memcpy(Vq, Vq_, row_msize);
-                    
-                    // Calculate block
-                    double App = 0.0, Aqq = 0.0, Apq = 0.0;
-                    #pragma omp simd
-                    for (int l = 0; l < nrow; l++)
-                    {
-                        App += Gp[l] * Vp[l];
-                        Aqq += Gq[l] * Vq[l];
-                        Apq += Gp[l] * Vq[l];
-                    }
-                    
-                    // Calculate J = [c s;-s c] such that J' * Apq * J = diagonal
-                    // [c s] = symschur2([app apq; apq aqq]);
-                    double c, s, tau, t;
-                    if (Apq == 0)
-                    {
-                        c = 1.0; s = 0.0;
-                    } else {
-                        tau = (Aqq - App) / (2.0 * Apq);
-                        if (tau > 0) t =  1.0 / ( tau + sqrt(1.0 + tau * tau));
-                        else         t = -1.0 / (-tau + sqrt(1.0 + tau * tau));
-                        c = 1.0 / sqrt(1 + t * t);
-                        s = t * c;
-                    }
-                    
-                    // Update G by applying J' on left
-                    // Update V by applying J on right
-                    #pragma omp simd
-                    for (int l = 0; l < nrow; l++)
-                    {
-                        Gp_[l] = c * Gp[l] - s * Gq[l];
-                        Gq_[l] = s * Gp[l] + c * Gq[l];
-                        Vp_[l] = c * Vp[l] - s * Vq[l];
-                        Vq_[l] = s * Vp[l] + c * Vq[l];
-                    }
+                    jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV, Gp, Gq, Vp, Vq);
                 }  // End of k loop
             }  // End of pragma omp parallel
             
-            // [top, bot] = music(top, bot)
+            // Generate next set of pairs for elimination
+            // Ref: Matrix Computation 4th edition, page 482
             int top_tail = top[semi_n - 1];
             int bot_head = bot[0];
             for (int l = semi_n - 1; l >= 2; l--) top[l] = top[l - 1];
@@ -153,7 +174,7 @@ void eig_jacobi_onesided(
         
         double ut = omp_get_wtime() - st;
         printf("Jacobi sweep %2d: %e %.3lf\n", ++sweep, relres_norm, ut);
-        if (sweep >= 20) break;
+        if (sweep >= 10) break;
     }  // End of while (relres_norm > 1e-14) loop 
 }
 
@@ -194,13 +215,15 @@ int main(int argc, char **argv)
     int n = atoi(argv[1]);
     int nthread = omp_get_max_threads();
     
-    double *A  = (double*) malloc(sizeof(double) * n * n);
-    double *A0 = (double*) malloc(sizeof(double) * n * n);
-    double *V  = (double*) malloc(sizeof(double) * n * n);
-    double *D  = (double*) malloc(sizeof(double) * n);
+    double *A   = (double*) malloc(sizeof(double) * n * n);
+    double *A0  = (double*) malloc(sizeof(double) * n * n);
+    double *VT  = (double*) malloc(sizeof(double) * n * n);
+    double *D   = (double*) malloc(sizeof(double) * n);
+    double *DVT = (double*) malloc(sizeof(double) * n * n);
+    double *A1  = (double*) malloc(sizeof(double) * n * n);
     double *workbuf = (double*) malloc(sizeof(double) * (nthread * 4 * n + n));
-    assert(A != NULL && A0 != NULL && V != NULL);
-    assert(D != NULL && workbuf != NULL);
+    assert(A != NULL && A0 != NULL && VT != NULL);
+    assert(D != NULL && workbuf != NULL && DVT != NULL && A1 != NULL);
     
     srand48(time(NULL));
     for (int i = 0; i < n; i++)
@@ -215,14 +238,38 @@ int main(int argc, char **argv)
     }
     
     memcpy(A, A0, sizeof(double) * n * n);
-    eig_jacobi_onesided(A, n, n, V, n, D, nthread, workbuf);
+    eig_jacobi_onesided(A, n, n, VT, n, D, nthread, workbuf);
+    // Verify Jacobi method's result
+    for (int i = 0; i < n; i++)
+    {
+        double *VT_i  = VT  + i * n;
+        double *DVT_i = DVT + i * n;
+        for (int j = 0; j < n; j++) DVT_i[j] = D[i] * VT_i[j];
+    }
+    cblas_dgemm(
+        CblasRowMajor, CblasTrans, CblasNoTrans, n, n, n,
+        1.0, VT, n, DVT, n, 0.0, A1, n
+    );
+    double A_2norm = 0.0, rel_norm = 0.0;
+    for (int i = 0; i < n * n; i++)
+    {
+        double diff = A0[i] - A1[i];
+        A_2norm  += A0[i] * A0[i];
+        rel_norm += diff * diff;
+    }
+    A_2norm  = sqrt(A_2norm);
+    rel_norm = sqrt(rel_norm);
+    rel_norm /= A_2norm;
+    printf("Jacobi ||V * D * V' - A||_fro / ||A||_fro = %e\n", rel_norm);
     
     test_mkl_qr (A, A0, workbuf, n);
     test_mkl_eig(A, A0, workbuf, n);
     
     free(A);
     free(A0);
-    free(V);
+    free(VT);
     free(D);
     free(workbuf);
+    free(DVT);
+    free(A1);
 }
