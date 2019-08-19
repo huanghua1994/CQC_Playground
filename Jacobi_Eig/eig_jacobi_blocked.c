@@ -19,25 +19,17 @@
 //   ldG    : Leading dimension of G
 //   V      : Eigenvectors, each row is an eigenvector, size >= ldV * nrow
 //   ldV    : Leading dimension of V
-//   Gp, Gq : Work buffer for storing G(:, p) and G(:, q), size >= nrow
-//   Vp, Vq : Work buffer for storing V(:, p) and V(:, q), size >= nrow 
 // Output parameters:
 //   G, V : The p-th and q-th rows will be updated
 void jacobi_rotation_kernel(
     const int nrow, const int p, const int q, 
-    double *G, const int ldG, double *V, const int ldV,
-    double *Gp, double *Gq, double *Vp, double *Vq
+    double *G, const int ldG, double *V, const int ldV
 )
 {
-    double *Gp_ = G + p * ldG;
-    double *Gq_ = G + q * ldG;
-    double *Vp_ = V + p * ldV;
-    double *Vq_ = V + q * ldV;
-    size_t row_msize = sizeof(double) * nrow;
-    memcpy(Gp, Gp_, row_msize);
-    memcpy(Gq, Gq_, row_msize);
-    memcpy(Vp, Vp_, row_msize);
-    memcpy(Vq, Vq_, row_msize);
+    double *Gp = G + p * ldG;
+    double *Gq = G + q * ldG;
+    double *Vp = V + p * ldV;
+    double *Vq = V + q * ldV;
     
     // Calculate block
     double App = 0.0, Aqq = 0.0, Apq = 0.0;
@@ -68,10 +60,12 @@ void jacobi_rotation_kernel(
     #pragma omp simd
     for (int l = 0; l < nrow; l++)
     {
-        Gp_[l] = c * Gp[l] - s * Gq[l];
-        Gq_[l] = s * Gp[l] + c * Gq[l];
-        Vp_[l] = c * Vp[l] - s * Vq[l];
-        Vq_[l] = s * Vp[l] + c * Vq[l];
+        double Gpl = Gp[l], Gql = Gq[l];
+        double Vpl = Vp[l], Vql = Vq[l];
+        Gp[l] = c * Gpl - s * Gql;
+        Gq[l] = s * Gpl + c * Gql;
+        Vp[l] = c * Vpl - s * Vql;
+        Vq[l] = s * Vpl + c * Vql;
     }
 }
 
@@ -108,14 +102,14 @@ void next_elimination_pairs(int *top, int *bot, const int npair)
 //   ldA     : Leading dimension of A, size >= nrow
 //   ldV     : Leading dimension of V, size >= nrow
 //   nthread : Number of threads
-//   workbuf : Working buffer, size >= nthread * 4 * nrow + nrow
+//   workbuf : Working buffer, size >= nrow
 // Output parameters:
 //   V : Eigenvectors, each row is an eigenvector, size >= ldV * nrow
 //   D : Array, size >= nrow
 void eig_jacobi_blocked(
     double *A, const int nrow, const int ldA,
     double *V, const int ldV, double *D,
-    const int nthread, double *workbuf
+    const int nthread, int *workbuf
 )
 {
     const int ncol   = nrow;
@@ -150,7 +144,7 @@ void eig_jacobi_blocked(
     printf("[DEBUG] blksize, nblock, blkrem, semi_nblock = %d, %d, %d, %d\n", blksize, nblock, blkrem, semi_nblock);
     
     // Set of block pairs for elimination, no two pairs has the same element
-    int *top = (int*) &workbuf[nthread * 4 * nrow];
+    int *top = workbuf;
     int *bot = top + semi_nblock;
     for (int i = 0; i < semi_nblock; i++)
     {
@@ -167,13 +161,6 @@ void eig_jacobi_blocked(
         double st = omp_get_wtime();
         #pragma omp parallel num_threads(nthread)
         {
-            int tid = omp_get_thread_num();
-            double *thread_buf = workbuf + tid * 4 * nrow;
-            double *Gp = thread_buf + 0 * nrow;
-            double *Gq = thread_buf + 1 * nrow;
-            double *Vp = thread_buf + 2 * nrow;
-            double *Vq = thread_buf + 3 * nrow;
-
             // Eliminate off-diagonal blocks
             for (int subsweep = 0; subsweep < nblock - 1; subsweep++)
             {
@@ -193,7 +180,7 @@ void eig_jacobi_blocked(
                     {
                         for (int q = blk_q_spos; q < blk_q_epos; q++)
                         {
-                            jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV, Gp, Gq, Vp, Vq);
+                            jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV);
                         }
                     }
                 }
@@ -212,7 +199,7 @@ void eig_jacobi_blocked(
                 {
                     for (int q = p + 1; q < blk_k_epos; q++)
                     {
-                        jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV, Gp, Gq, Vp, Vq);
+                        jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV);
                     }
                 }
             }  // End of k loop
@@ -280,7 +267,7 @@ int main(int argc, char **argv)
     double *D   = (double*) malloc(sizeof(double) * n);
     double *DVT = (double*) malloc(sizeof(double) * n * n);
     double *A1  = (double*) malloc(sizeof(double) * n * n);
-    double *workbuf = (double*) malloc(sizeof(double) * (nthread * 4 * n + n));
+    double *workbuf = (double*) malloc(sizeof(double) * n);
     assert(A != NULL && A0 != NULL && VT != NULL);
     assert(D != NULL && workbuf != NULL && DVT != NULL && A1 != NULL);
     
@@ -297,7 +284,7 @@ int main(int argc, char **argv)
     }
     
     memcpy(A, A0, sizeof(double) * n * n);
-    eig_jacobi_blocked(A, n, n, VT, n, D, nthread, workbuf);
+    eig_jacobi_blocked(A, n, n, VT, n, D, nthread, (int*) workbuf);
     // Verify Jacobi method's result
     for (int i = 0; i < n; i++)
     {

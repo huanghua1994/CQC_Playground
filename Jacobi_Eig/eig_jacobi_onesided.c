@@ -19,25 +19,17 @@
 //   ldG    : Leading dimension of G
 //   V      : Eigenvectors, each row is an eigenvector, size >= ldV * nrow
 //   ldV    : Leading dimension of V
-//   Gp, Gq : Work buffer for storing G(:, p) and G(:, q), size >= nrow
-//   Vp, Vq : Work buffer for storing V(:, p) and V(:, q), size >= nrow 
 // Output parameters:
 //   G, V : The p-th and q-th rows will be updated
 void jacobi_rotation_kernel(
     const int nrow, const int p, const int q, 
-    double *G, const int ldG, double *V, const int ldV,
-    double *Gp, double *Gq, double *Vp, double *Vq
+    double *G, const int ldG, double *V, const int ldV
 )
 {
-    double *Gp_ = G + p * ldG;
-    double *Gq_ = G + q * ldG;
-    double *Vp_ = V + p * ldV;
-    double *Vq_ = V + q * ldV;
-    size_t row_msize = sizeof(double) * nrow;
-    memcpy(Gp, Gp_, row_msize);
-    memcpy(Gq, Gq_, row_msize);
-    memcpy(Vp, Vp_, row_msize);
-    memcpy(Vq, Vq_, row_msize);
+    double *Gp = G + p * ldG;
+    double *Gq = G + q * ldG;
+    double *Vp = V + p * ldV;
+    double *Vq = V + q * ldV;
     
     // Calculate block
     double App = 0.0, Aqq = 0.0, Apq = 0.0;
@@ -68,11 +60,30 @@ void jacobi_rotation_kernel(
     #pragma omp simd
     for (int l = 0; l < nrow; l++)
     {
-        Gp_[l] = c * Gp[l] - s * Gq[l];
-        Gq_[l] = s * Gp[l] + c * Gq[l];
-        Vp_[l] = c * Vp[l] - s * Vq[l];
-        Vq_[l] = s * Vp[l] + c * Vq[l];
+        double Gpl = Gp[l], Gql = Gq[l];
+        double Vpl = Vp[l], Vql = Vq[l];
+        Gp[l] = c * Gpl - s * Gql;
+        Gq[l] = s * Gpl + c * Gql;
+        Vp[l] = c * Vpl - s * Vql;
+        Vq[l] = s * Vpl + c * Vql;
     }
+}
+
+// Generate next set of pairs for elimination
+// Ref: Matrix Computation 4th edition, page 482
+// Input parameters:
+//   top, bot : (top[k], bot[k]) is a pair
+//   npair    : Total number of pairs to be eliminated
+// Output parameters:
+//   top, bot : New sets of pairs
+void next_elimination_pairs(int *top, int *bot, const int npair)
+{
+    int top_tail = top[npair - 1];
+    int bot_head = bot[0];
+    for (int l = npair - 1; l >= 2; l--) top[l] = top[l - 1];
+    for (int l = 0; l < npair; l++) bot[l] = bot[l + 1];
+    top[1] = bot_head;
+    bot[npair - 1] = top_tail;
 }
 
 // Parallel Jacobi method for eigen decompisition
@@ -90,14 +101,14 @@ void jacobi_rotation_kernel(
 void eig_jacobi_onesided(
     double *A, const int nrow, const int ldA,
     double *V, const int ldV, double *D,
-    const int nthread, double *workbuf
+    const int nthread, int *workbuf
 )
 {
     const int ncol = nrow;
     const int semi_n = nrow / 2;
     
     // Set of pairs for elimination, no two pairs has the same element
-    int *top = (int*) &workbuf[nthread * 4 * nrow];
+    int *top = workbuf;
     int *bot = top + semi_n;
     for (int i = 0; i < semi_n; i++)
     {
@@ -105,10 +116,13 @@ void eig_jacobi_onesided(
         bot[i] = 2 * i + 1;
     }
     
+    // Initialize V = eye(nrow)
     memset(D, 0, sizeof(double) * nrow);
     memset(V, 0, sizeof(double) * ldV * nrow);
     for (int i = 0; i < nrow; i++) V[i * ldV + i] = 1.0;
     
+    // We need to check the fro-norm of off-diagonal V' * A * V, but we don't want 
+    // to form the matrix explicitely. ||A|_fro - ||diag(A)||_fro is equivalent.
     double A_2norm = 0.0, D_2norm = 0.0, relres_norm;
     #pragma omp parallel for num_threads(nthread) reduction(+:A_2norm)
     for (int i = 0; i < nrow; i++)
@@ -129,34 +143,17 @@ void eig_jacobi_onesided(
         double st = omp_get_wtime();
         for (int subsweep = 0; subsweep < nrow - 1; subsweep++)
         {
-            #pragma omp parallel num_threads(nthread)
+            #pragma omp parallel for num_threads(nthread) schedule(guided)
+            for (int k = 0; k < semi_n; k++)
             {
-                int tid = omp_get_thread_num();
-                double *thread_buf = workbuf + tid * 4 * nrow;
-                double *Gp = thread_buf + 0 * nrow;
-                double *Gq = thread_buf + 1 * nrow;
-                double *Vp = thread_buf + 2 * nrow;
-                double *Vq = thread_buf + 3 * nrow;
+                // Choose such that p < q
+                int p = MIN(top[k], bot[k]);
+                int q = MAX(top[k], bot[k]);
                 
-                #pragma omp for schedule(guided)
-                for (int k = 0; k < semi_n; k++)
-                {
-                    // Choose such that p < q
-                    int p = MIN(top[k], bot[k]);
-                    int q = MAX(top[k], bot[k]);
-                    
-                    jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV, Gp, Gq, Vp, Vq);
-                }  // End of k loop
-            }  // End of pragma omp parallel
+                jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV);
+            }  // End of k loop
             
-            // Generate next set of pairs for elimination
-            // Ref: Matrix Computation 4th edition, page 482
-            int top_tail = top[semi_n - 1];
-            int bot_head = bot[0];
-            for (int l = semi_n - 1; l >= 2; l--) top[l] = top[l - 1];
-            for (int l = 0; l < semi_n; l++) bot[l] = bot[l + 1];
-            top[1] = bot_head;
-            bot[semi_n - 1] = top_tail;
+            next_elimination_pairs(top, bot, semi_n);
         }  // End of subsweep loop
         
         D_2norm = 0.0;
@@ -221,7 +218,7 @@ int main(int argc, char **argv)
     double *D   = (double*) malloc(sizeof(double) * n);
     double *DVT = (double*) malloc(sizeof(double) * n * n);
     double *A1  = (double*) malloc(sizeof(double) * n * n);
-    double *workbuf = (double*) malloc(sizeof(double) * (nthread * 4 * n + n));
+    double *workbuf = (double*) malloc(sizeof(double) * n);
     assert(A != NULL && A0 != NULL && VT != NULL);
     assert(D != NULL && workbuf != NULL && DVT != NULL && A1 != NULL);
     
@@ -238,7 +235,7 @@ int main(int argc, char **argv)
     }
     
     memcpy(A, A0, sizeof(double) * n * n);
-    eig_jacobi_onesided(A, n, n, VT, n, D, nthread, workbuf);
+    eig_jacobi_onesided(A, n, n, VT, n, D, nthread, (int*) workbuf);
     // Verify Jacobi method's result
     for (int i = 0; i < n; i++)
     {
