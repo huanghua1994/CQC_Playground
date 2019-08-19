@@ -140,12 +140,12 @@ void eig_jacobi_blocked(
     A_2norm = sqrt(A_2norm);
 
     // Set the block size info
-    int blksize = (256 * 1024) / (8 * 2 * nrow);
+    int blksize = (256 * 1024) / (8 * 2 * 2 * nrow);
     int nblock  = nrow / blksize;  
     nblock = MAX(nblock, nthread);
     nblock = (nblock + 1) / 2 * 2; // Need to be even
     blksize = nrow / nblock;
-    int blkrem  = nrow % blksize;
+    int blkrem = nrow % nblock;
     int semi_nblock = nblock / 2;
     printf("[DEBUG] blksize, nblock, blkrem, semi_nblock = %d, %d, %d, %d\n", blksize, nblock, blkrem, semi_nblock);
     
