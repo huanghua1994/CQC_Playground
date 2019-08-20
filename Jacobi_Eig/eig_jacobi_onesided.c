@@ -122,7 +122,7 @@ void eig_jacobi_onesided(
     for (int i = 0; i < nrow; i++) V[i * ldV + i] = 1.0;
     
     // We need to check the fro-norm of off-diagonal V' * A * V, but we don't want 
-    // to form the matrix explicitely. ||A|_fro - ||diag(A)||_fro is equivalent.
+    // to form the matrix explicitly. ||A|_fro - ||diag(A)||_fro is equivalent.
     double A_2norm = 0.0, D_2norm = 0.0, relres_norm;
     #pragma omp parallel for num_threads(nthread) reduction(+:A_2norm)
     for (int i = 0; i < nrow; i++)
@@ -173,22 +173,6 @@ void eig_jacobi_onesided(
         printf("Jacobi sweep %2d: %e %.3lf\n", ++sweep, relres_norm, ut);
         if (sweep >= 10) break;
     }  // End of while (relres_norm > 1e-14) loop 
-}
-
-void test_mkl_qr(double *A, double *A0, double *tau, const int n)
-{
-    // Warm up
-    memcpy(A, A0, sizeof(double) * n * n);
-    LAPACKE_dgeqrfp(LAPACK_ROW_MAJOR, n, n, A, n, tau);
-    
-    for (int i = 0; i < 10; i++)
-    {
-        memcpy(A, A0, sizeof(double) * n * n);
-        double st = omp_get_wtime();
-        LAPACKE_dgeqrfp(LAPACK_ROW_MAJOR, n, n, A, n, tau);
-        double ut = omp_get_wtime() - st;
-        printf("LAPACKE_dgeqrfp %2d: %.3lf (s)\n", i, ut);
-    }
 }
 
 void test_mkl_eig(double *A, double *A0, double *eigval, const int n)
@@ -259,7 +243,6 @@ int main(int argc, char **argv)
     rel_norm /= A_2norm;
     printf("Jacobi ||V * D * V' - A||_fro / ||A||_fro = %e\n", rel_norm);
     
-    test_mkl_qr (A, A0, workbuf, n);
     test_mkl_eig(A, A0, workbuf, n);
     
     free(A);
