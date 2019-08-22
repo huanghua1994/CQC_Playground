@@ -1,10 +1,6 @@
 function [V, D] = eig_jacobi_onesided_cyclic(A)
 
 n = length(A);
-if mod(n,2) ~= 0
-  error('Input matrix dimension must be even');
-end
-
 A_norm = norm(A, 'fro');
 V = eye(size(A));
 D = zeros(n, 1);
