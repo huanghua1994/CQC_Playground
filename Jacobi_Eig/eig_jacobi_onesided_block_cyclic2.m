@@ -19,6 +19,7 @@ for sweep = 1:10
         blk_q_n = blk_q_e - blk_q_s + 1;
     
         if (blk_p_s < blk_q_s)
+            % Upper triangle blocks
             A_blk = zeros(blk_p_n + blk_q_n);
             s0 = 1; 
             e0 = blk_p_n;
@@ -33,43 +34,17 @@ for sweep = 1:10
             A_blk(s1:e1, s0:e0) = GT_blk_q' * V_blk_p;
             A_blk(s1:e1, s1:e1) = GT_blk_q' * V_blk_q;
             J_blk = jacobi_block_subsweep(A_blk, s0, e0, s1, e1);
-            
-            %J = eye(n);
-            %J(blk_p_s:blk_p_e, blk_p_s:blk_p_e) = J_blk(s0:e0, s0:e0);
-            %J(blk_p_s:blk_p_e, blk_q_s:blk_q_e) = J_blk(s0:e0, s1:e1);
-            %J(blk_q_s:blk_q_e, blk_p_s:blk_p_e) = J_blk(s1:e1, s0:e0);
-            %J(blk_q_s:blk_q_e, blk_q_s:blk_q_e) = J_blk(s1:e1, s1:e1);
-            %V = V * J;
-            %GT = GT * J;
+
             GT(:, blk_p_s:blk_p_e) = GT_blk_p * J_blk(s0:e0, s0:e0) + GT_blk_q * J_blk(s1:e1, s0:e0);
             GT(:, blk_q_s:blk_q_e) = GT_blk_p * J_blk(s0:e0, s1:e1) + GT_blk_q * J_blk(s1:e1, s1:e1);
             V(:, blk_p_s:blk_p_e)  =  V_blk_p * J_blk(s0:e0, s0:e0) +  V_blk_q * J_blk(s1:e1, s0:e0);
             V(:, blk_q_s:blk_q_e)  =  V_blk_p * J_blk(s0:e0, s1:e1) +  V_blk_q * J_blk(s1:e1, s1:e1);
         else
-            for p = blk_p_s : blk_p_e
-            for q = blk_q_s : blk_q_e
-                if (q <= p), continue; end  % Skip lower triangle pairs in diagonal blocks
-            
-                % Calculate block (col access for GT; col access for V)
-                GTp = GT(:, p);
-                GTq = GT(:, q);
-                Vp  = V(:, p);
-                Vq  = V(:, q);
-                apq = dot(GTp, Vq);
-                app = dot(GTp, Vp);
-                aqq = dot(GTq, Vq);
-
-                % Calculate J=[c s;-s c] such that J'*Apq*J = diagonal
-                [c s] = symschur2([app apq; apq aqq]);
-
-                % Update GT by applying J' on left (col access)
-                % Update V by applying J on right (col access)
-                GT(:, p) = c * GTp - s * GTq;
-                GT(:, q) = s * GTp + c * GTq;
-                V(:, p) = c * Vp - s * Vq;
-                V(:, q) = s * Vp + c * Vq;
-            end
-            end
+            % Diagonal blocks
+            A_blk = GT(:, blk_p_s:blk_p_e)' * V(:, blk_p_s:blk_p_e);
+            J_blk = jacobi_block_subsweep(A_blk, 1, blk_p_n, 1, blk_p_n);
+            GT(:, blk_p_s:blk_p_e) = GT(:, blk_p_s:blk_p_e) * J_blk;
+            V(:, blk_p_s:blk_p_e)  =  V(:, blk_p_s:blk_p_e) * J_blk;
         end
     end
     end

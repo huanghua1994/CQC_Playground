@@ -7,6 +7,8 @@ GT = A'; % conceptually, G=V'*A
 
 for p = rs : re
     for q = cs : ce
+        if (q <= p), continue; end
+    
         % Calculate block (col access for GT; col access for V)
         GTp = GT(:, p);
         GTq = GT(:, q);
