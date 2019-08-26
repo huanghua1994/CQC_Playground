@@ -176,7 +176,7 @@ void eig_jacobi_blocked(
     A_2norm = sqrt(A_2norm);
 
     // Set the block size info
-    int blksize = 64;
+    int blksize = 64; //(256 * 1024) / (8 * 2 * 2 * nrow);
     int nblock  = nrow / blksize;  
     nblock = MAX(nblock, nthread);
     nblock = (nblock + 1) / 2 * 2; // Need to be even
@@ -287,9 +287,18 @@ void eig_jacobi_blocked(
                     );
                     
                     // V_blk = jacobi_block_subsweep(A_blk, s0, e0, s1, e1);
+                    int srow1 = 0, nrow1 = p_blk_size, scol1 = p_blk_size, ncol1 = q_blk_size;
+                    // Adjust the sub-problem size for superdiagonal blocks
+                    if (p_blk == nblock - 2) nrow1 = p_blk_size + q_blk_size;
+                    if (q_blk == p_blk + 1)
+                    {
+                        scol1 = 0;
+                        ncol1 = p_blk_size + q_blk_size;
+                    }
                     jacobi_subblock_sweep(
                         VAblk_size, A_blk, V_blk, 
-                        0, p_blk_size, p_blk_size, q_blk_size
+                        //0, p_blk_size, p_blk_size, q_blk_size
+                        srow1, nrow1, scol1, ncol1
                     );
                     
                     // Notice: V_blk in C is the transpose of V_blk in MATLAB
@@ -350,49 +359,6 @@ void eig_jacobi_blocked(
                 #pragma omp master
                 next_elimination_pairs(top, bot, semi_nblock);
             }  // End of subsweep loop
-
-            // Eliminate diagonal blocks off-diagonal elements
-            #pragma omp for schedule(dynamic)
-            for (int k = 0; k < nblock; k++)
-            {
-                int k_blk_spos = blk_spos(nblock, blksize, blkrem, k);
-                int k_blk_epos = blk_spos(nblock, blksize, blkrem, k + 1);
-                int k_blk_size = k_blk_epos - k_blk_spos;
-                
-                double *G_k_blk_ = G + k_blk_spos * ldG;
-                double *V_k_blk_ = V + k_blk_spos * ldV;
-                copy_matrix_block(G_k_blk, nrow, G_k_blk_, ldG, k_blk_size, nrow);
-                copy_matrix_block(V_k_blk, nrow, V_k_blk_, ldV, k_blk_size, nrow);
-                
-                // A_blk = GT(:, blk_p_s:blk_p_e)' * V(:, blk_p_s:blk_p_e);
-                cblas_dgemm(
-                    CblasRowMajor, CblasNoTrans, CblasTrans, 
-                    k_blk_size, k_blk_size, nrow,
-                    1.0, G_k_blk, nrow, V_k_blk, nrow, 
-                    0.0, A_blk, k_blk_size
-                );
-                
-                // V_blk = jacobi_block_subsweep(A_blk, 1, blk_p_n, 1, blk_p_n);
-                jacobi_subblock_sweep(
-                    k_blk_size, A_blk, V_blk, 
-                    0, k_blk_size, 0, k_blk_size
-                );
-                
-                // GT(:, blk_p_s:blk_p_e) = GT(:, blk_p_s:blk_p_e) * V_blk;
-                cblas_dgemm(
-                    CblasRowMajor, CblasNoTrans, CblasNoTrans, 
-                    k_blk_size, nrow, k_blk_size, 
-                    1.0, V_blk, k_blk_size, G_k_blk, nrow, 
-                    0.0, G_k_blk_, ldG
-                );
-                //  V(:, blk_p_s:blk_p_e) =  V(:, blk_p_s:blk_p_e) * V_blk;
-                cblas_dgemm(
-                    CblasRowMajor, CblasNoTrans, CblasNoTrans, 
-                    k_blk_size, nrow, k_blk_size, 
-                    1.0, V_blk, k_blk_size, V_k_blk, nrow, 
-                    0.0, V_k_blk_, ldV
-                );
-            }  // End of k loop
         }  // End of pragma omp parallel
         
         D_2norm = 0.0;
