@@ -3,13 +3,75 @@
 #include <string.h>
 #include <assert.h>
 #include <math.h>
-#include <time.h>
 #include <omp.h>
-
 #include <mkl.h>
+
+#include "Jacobi_dsyev.h"
 
 #define MAX(a, b) ((a)>(b))?(a):(b)
 #define MIN(a, b) ((a)<(b))?(a):(b)
+
+struct Jacobi_dsyev_workbuf_
+{
+    int topbot_size;
+    int *topbot;
+    
+    int thread_buff_size;
+    double *thread_buff;
+};
+
+typedef struct Jacobi_dsyev_workbuf_* Jacobi_dsyev_workbuf_t;
+
+static Jacobi_dsyev_workbuf_t Jacobi_dsyev_workbuf = NULL;
+
+static void init_Jacobi_dsyev_workbuf()
+{
+    if (Jacobi_dsyev_workbuf != NULL) return;
+    
+    Jacobi_dsyev_workbuf = (Jacobi_dsyev_workbuf_t) malloc(sizeof(struct Jacobi_dsyev_workbuf_));
+    Jacobi_dsyev_workbuf->topbot_size      = 0;
+    Jacobi_dsyev_workbuf->thread_buff_size = 0;
+    Jacobi_dsyev_workbuf->topbot           = NULL;
+    Jacobi_dsyev_workbuf->thread_buff      = NULL;
+}
+
+static void alloc_topbot_buf(const int size)
+{
+    if (Jacobi_dsyev_workbuf->topbot_size >= size) return;
+    
+    free(Jacobi_dsyev_workbuf->topbot);
+    size_t topbot_msize = sizeof(int) * size;
+    Jacobi_dsyev_workbuf->topbot = malloc(topbot_msize);
+    Jacobi_dsyev_workbuf->topbot_size = size;
+}
+
+static void alloc_thread_buff(const int size)
+{
+    if (Jacobi_dsyev_workbuf->thread_buff_size >= size) return;
+    
+    free(Jacobi_dsyev_workbuf->thread_buff);
+    size_t thread_buff_msize = sizeof(double) * size;
+    Jacobi_dsyev_workbuf->thread_buff = malloc(thread_buff_msize);
+    Jacobi_dsyev_workbuf->thread_buff_size = size;
+}
+
+static int blk_spos(const int nblock, const int blksize, const int blkrem, const int iblock)
+{
+    int res;
+    if (iblock < blkrem) res = (blksize + 1) * iblock;
+    else res = blksize * iblock + blkrem;
+    return res;
+}
+
+static void copy_matrix_block(
+    double *dst, const int ldd, double *src, const int lds, 
+    const int nrows, const int ncols
+)
+{
+    size_t ncols_msize = sizeof(double) * ncols;
+    for (int irow = 0; irow < nrows; irow++)
+        memcpy(dst + irow * ldd, src + irow * lds, ncols_msize);
+} 
 
 // Perform a Jacobi roration B = J^T * A * J where J = J(p, q, theta)
 // Input parameters:
@@ -21,7 +83,7 @@
 //   ldV    : Leading dimension of V
 // Output parameters:
 //   G, V : The p-th and q-th rows will be updated
-void jacobi_rotation_kernel(
+void jacobi_rotation_pair(
     const int nrow, const int p, const int q, 
     double *G, const int ldG, double *V, const int ldV
 )
@@ -96,28 +158,10 @@ void jacobi_subblock_sweep(
         for (int q = blk_s_col; q < blk_e_col; q++)
         {
             if (p >= q) continue;
-            jacobi_rotation_kernel(nrow, p, q, G, ldG, V, ldV);
+            jacobi_rotation_pair(nrow, p, q, G, ldG, V, ldV);
         }
     }
 }
-
-static int blk_spos(const int nblock, const int blksize, const int blkrem, const int iblock)
-{
-    int res;
-    if (iblock < blkrem) res = (blksize + 1) * iblock;
-    else res = blksize * iblock + blkrem;
-    return res;
-}
-
-void copy_matrix_block(
-    double *dst, const int ldd, double *src, const int lds, 
-    const int nrows, const int ncols
-)
-{
-    size_t ncols_msize = sizeof(double) * ncols;
-    for (int irow = 0; irow < nrows; irow++)
-        memcpy(dst + irow * ldd, src + irow * lds, ncols_msize);
-} 
 
 // Generate next set of pairs for elimination
 // Ref: Matrix Computation 4th edition, page 482
@@ -136,25 +180,14 @@ void next_elimination_pairs(int *top, int *bot, const int npair)
     bot[npair - 1] = top_tail;
 }
 
-// Parallel Jacobi method for eigen decompisition, blocked version
-// Input parameters:
-//   A       : Symmetric matrix to be decomposed, row-major, 
-//             size >= ldA * nrow, will be overwritten when exit
-//   nrow    : Number of rows and columns
-//   ldA     : Leading dimension of A, size >= nrow
-//   ldV     : Leading dimension of V, size >= nrow
-//   nthread : Number of threads
-//   workbuf : Working buffer, size >= nrow
-// Output parameters:
-//   V : Eigenvectors, each row is an eigenvector, size >= ldV * nrow
-//   D : Array, size >= nrow
-void eig_jacobi_blocked(
-    double *A, const int nrow, const int ldA,
-    double *V, const int ldV, double *D,
-    const int nthread, int *workbuf
+
+void Jacobi_dsyev_pseudo_blocked(
+    const int n, double *A, const int ldA,
+    double *V, const int ldV, double *D, 
+    int max_sweep, double rel_tol, const int nthread
 )
 {
-    const int ncol   = nrow;
+    const int nrow = n, ncol = n;
     const int semi_n = nrow / 2;
     
     // Initialize V = eye(nrow)
@@ -176,18 +209,17 @@ void eig_jacobi_blocked(
     A_2norm = sqrt(A_2norm);
 
     // Set the block size info
-    int blksize = 64; //(256 * 1024) / (8 * 2 * 2 * nrow);
+    int blksize = (256 * 1024) / (8 * 2 * 2 * nrow);
     int nblock  = nrow / blksize;  
     nblock = MAX(nblock, nthread);
     nblock = (nblock + 1) / 2 * 2; // Need to be even
     blksize = nrow / nblock;
     int blkrem = nrow % nblock;
     int semi_nblock = nblock / 2;
-    int blksize1 = blksize + (blkrem > 0 ? 1 : 0);
-    printf("[DEBUG] blksize, nblock, blkrem, semi_nblock = %d, %d, %d, %d\n", blksize, nblock, blkrem, semi_nblock);
     
     // Set of block pairs for elimination, no two pairs has the same element
-    int *top = workbuf;
+    alloc_topbot_buf(nblock);
+    int *top = Jacobi_dsyev_workbuf->topbot;
     int *bot = top + semi_nblock;
     for (int i = 0; i < semi_nblock; i++)
     {
@@ -195,16 +227,134 @@ void eig_jacobi_blocked(
         bot[i] = 2 * i + 1;
     }
 
-    size_t thread_buff_size = 4 * nrow * blksize1 + 8 * blksize1 * blksize1;
-    double *buff = (double*) malloc(sizeof(double) * nthread * thread_buff_size);
+    // Conceptually, G = V' * A
+    double *G = A;
+    int ldG = ldA, sweep = 0;
+    relres_norm = fabs(A_2norm - D_2norm) / A_2norm; 
+    while (relres_norm > rel_tol)
+    {
+        double st = omp_get_wtime();
+        #pragma omp parallel num_threads(nthread)
+        {
+            // Eliminate off-diagonal blocks
+            for (int subsweep = 0; subsweep < nblock - 1; subsweep++)
+            {
+                #pragma omp barrier
+                #pragma omp for schedule(dynamic)
+                for (int k = 0; k < semi_nblock; k++)
+                {
+                    int blk_p = MIN(top[k], bot[k]);
+                    int blk_q = MAX(top[k], bot[k]);
 
-    mkl_set_num_threads(1);
+                    int blk_p_spos = blk_spos(nblock, blksize, blkrem, blk_p);
+                    int blk_q_spos = blk_spos(nblock, blksize, blkrem, blk_q);
+                    int blk_p_epos = blk_spos(nblock, blksize, blkrem, blk_p + 1);
+                    int blk_q_epos = blk_spos(nblock, blksize, blkrem, blk_q + 1);
+
+                    for (int p = blk_p_spos; p < blk_p_epos; p++)
+                    {
+                        for (int q = blk_q_spos; q < blk_q_epos; q++)
+                        {
+                            jacobi_rotation_pair(nrow, p, q, G, ldG, V, ldV);
+                        }
+                    }
+                }
+
+                #pragma omp master
+                next_elimination_pairs(top, bot, semi_nblock);
+            }  // End of subsweep loop
+
+            // Eliminate diagonal blocks off-diagonal elements
+            #pragma omp for schedule(dynamic)
+            for (int k = 0; k < nblock; k++)
+            {
+                int blk_k_spos = blk_spos(nblock, blksize, blkrem, k);
+                int blk_k_epos = blk_spos(nblock, blksize, blkrem, k + 1);
+                for (int p = blk_k_spos; p < blk_k_epos; p++)
+                {
+                    for (int q = p + 1; q < blk_k_epos; q++)
+                    {
+                        jacobi_rotation_pair(nrow, p, q, G, ldG, V, ldV);
+                    }
+                }
+            }  // End of k loop
+        }  // End of pragma omp parallel
+        
+        D_2norm = 0.0;
+        for (int k = 0; k < nrow; k++)
+        {
+            double tmp = 0.0;
+            double *Gk = G + k * ldG;
+            double *Vk = V + k * ldV;
+            for (int l = 0; l < nrow; l++) tmp += Gk[l] * Vk[l];
+            D[k] = tmp;
+            D_2norm += tmp * tmp;
+        }
+        D_2norm = sqrt(D_2norm);
+        relres_norm = fabs(A_2norm - D_2norm) / A_2norm; 
+        
+        double ut = omp_get_wtime() - st;
+        //printf("Jacobi sweep %2d: %e %.1lf ms\n", ++sweep, relres_norm, ut * 1e3);
+        if (sweep >= max_sweep) break;
+    }  // End of while (relres_norm > 1e-14) loop 
+}
+
+void Jacobi_dsyev_blocked(
+    const int n, double *A, const int ldA,
+    double *V, const int ldV, double *D, 
+    int max_sweep, double rel_tol, const int nthread
+)
+{
+    const int nrow = n, ncol = n;
+    const int semi_n = nrow / 2;
+
+    // Initialize V = eye(nrow)
+    memset(D, 0, sizeof(double) * nrow);
+    memset(V, 0, sizeof(double) * ldV * nrow);
+    for (int i = 0; i < nrow; i++) V[i * ldV + i] = 1.0;
+    
+    // We need to check the fro-norm of off-diagonal V' * A * V, but we don't want 
+    // to form the matrix explicitly. ||A|_fro - ||diag(A)||_fro is equivalent.
+    double A_2norm = 0.0, D_2norm = 0.0, relres_norm;
+    #pragma omp parallel for num_threads(nthread) reduction(+:A_2norm)
+    for (int i = 0; i < nrow; i++)
+    {
+        double tmp = 0.0;
+        double *A_row = A + i * ldA;
+        for (int j = 0; j < ncol; j++) tmp += A_row[j] * A_row[j];
+        A_2norm += tmp;
+    }
+    A_2norm = sqrt(A_2norm);
+
+    // Set the block size info
+    int blksize = 64; 
+    int nblock  = nrow / blksize;  
+    nblock = MAX(nblock, nthread);
+    nblock = (nblock + 1) / 2 * 2; // Need to be even
+    blksize = nrow / nblock;
+    int blkrem = nrow % nblock;
+    int semi_nblock = nblock / 2;
+    int blksize1 = blksize + (blkrem > 0 ? 1 : 0);
+    
+    // Set of block pairs for elimination, no two pairs has the same element
+    alloc_topbot_buf(nblock);
+    int *top = Jacobi_dsyev_workbuf->topbot;
+    int *bot = top + semi_nblock;
+    for (int i = 0; i < semi_nblock; i++)
+    {
+        top[i] = 2 * i;
+        bot[i] = 2 * i + 1;
+    }
+
+    int thread_buff_size = 4 * nrow * blksize1 + 8 * blksize1 * blksize1;
+    alloc_thread_buff(nthread * thread_buff_size);
+    double *buff = Jacobi_dsyev_workbuf->thread_buff;
 
     // Conceptually, G = V' * A
     double *G = A;
     int ldG = ldA, sweep = 0;
     relres_norm = fabs(A_2norm - D_2norm) / A_2norm; 
-    while (relres_norm > 1e-14)
+    while (relres_norm > rel_tol)
     {
         double st = omp_get_wtime();
         #pragma omp parallel num_threads(nthread)
@@ -375,89 +525,31 @@ void eig_jacobi_blocked(
         relres_norm = fabs(A_2norm - D_2norm) / A_2norm; 
         
         double ut = omp_get_wtime() - st;
-        printf("Jacobi sweep %2d: %e %.3lf\n", ++sweep, relres_norm, ut);
-        if (sweep >= 15) break;
+        //printf("Jacobi sweep %2d: %e %.1lf ms\n", ++sweep, relres_norm, ut * 1e3);
+        if (sweep >= max_sweep) break;
     }  // End of while (relres_norm > 1e-14) loop 
-    
-    mkl_set_num_threads(nthread);
-    free(buff);
 }
 
-void test_mkl_eig(double *A, double *A0, double *eigval, const int n)
+void Jacobi_dsyev(
+    const int n, double *A, const int ldA,
+    double *V, const int ldV, double *D, 
+    int max_sweep, double rel_tol, const int nthread
+)
 {
-    // Warm up
-    memcpy(A, A0, sizeof(double) * n * n);
-    LAPACKE_dsyev(LAPACK_ROW_MAJOR, 'V', 'U', n, A, n, eigval);
+    init_Jacobi_dsyev_workbuf();
+    if (rel_tol < 1e-15) rel_tol = 3e-14;
+    if (max_sweep > 100) max_sweep = 50;
     
-    for (int i = 0; i < 10; i++)
+    if (n < 400)
     {
-        memcpy(A, A0, sizeof(double) * n * n);
-        double st = omp_get_wtime();
-        LAPACKE_dsyev(LAPACK_ROW_MAJOR, 'V', 'U', n, A, n, eigval);
-        double ut = omp_get_wtime() - st;
-        printf("LAPACKE_dsyev %2d: %.3lf (s)\n", i, ut);
+        Jacobi_dsyev_pseudo_blocked(
+            n, A, ldA, V, ldV, D,
+            max_sweep, rel_tol, nthread
+        );
+    } else {
+        Jacobi_dsyev_blocked(
+            n, A, ldA, V, ldV, D,
+            max_sweep, rel_tol, nthread
+        );
     }
-}
-
-int main(int argc, char **argv)
-{
-    int n = atoi(argv[1]);
-    int nthread = omp_get_max_threads();
-    
-    double *A   = (double*) malloc(sizeof(double) * n * n);
-    double *A0  = (double*) malloc(sizeof(double) * n * n);
-    double *VT  = (double*) malloc(sizeof(double) * n * n);
-    double *D   = (double*) malloc(sizeof(double) * n);
-    double *DVT = (double*) malloc(sizeof(double) * n * n);
-    double *A1  = (double*) malloc(sizeof(double) * n * n);
-    double *workbuf = (double*) malloc(sizeof(double) * n);
-    assert(A != NULL && A0 != NULL && VT != NULL);
-    assert(D != NULL && workbuf != NULL && DVT != NULL && A1 != NULL);
-
-    srand48(time(NULL));
-    for (int i = 0; i < n; i++)
-    {
-        for (int j = 0; j < i; j++)
-        {
-            double val = drand48() + 1.0;
-            A0[i * n + j] = val;
-            A0[j * n + i] = val;
-        }
-        A0[i * n + i] += 2.0;
-    }
-    
-    memcpy(A, A0, sizeof(double) * n * n);
-    eig_jacobi_blocked(A, n, n, VT, n, D, nthread, (int*) workbuf);
-    // Verify Jacobi method's result
-    for (int i = 0; i < n; i++)
-    {
-        double *VT_i  = VT  + i * n;
-        double *DVT_i = DVT + i * n;
-        for (int j = 0; j < n; j++) DVT_i[j] = D[i] * VT_i[j];
-    }
-    cblas_dgemm(
-        CblasRowMajor, CblasTrans, CblasNoTrans, n, n, n,
-        1.0, VT, n, DVT, n, 0.0, A1, n
-    );
-    double A_2norm = 0.0, rel_norm = 0.0;
-    for (int i = 0; i < n * n; i++)
-    {
-        double diff = A0[i] - A1[i];
-        A_2norm  += A0[i] * A0[i];
-        rel_norm += diff * diff;
-    }
-    A_2norm  = sqrt(A_2norm);
-    rel_norm = sqrt(rel_norm);
-    rel_norm /= A_2norm;
-    printf("Jacobi ||V * D * V' - A||_fro / ||A||_fro = %e\n", rel_norm);
-    
-    test_mkl_eig(A, A0, workbuf, n);
-    
-    free(A);
-    free(A0);
-    free(VT);
-    free(D);
-    free(workbuf);
-    free(DVT);
-    free(A1);
 }
