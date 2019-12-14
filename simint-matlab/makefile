@@ -19,7 +19,7 @@ endif
 SOURCES = readmol.c calculate_eri.c calculate_kei.c calculate_ovlpi.c calculate_nai.c
 TARGETS = $(SOURCES:.c=.$(MEXSUFFIX))
 
-SIMINT_INSTALL_DIR = /home/huahuang/Workspace/simint/build-avx-matlab/install
+SIMINT_INSTALL_DIR = ./simint-avx
 
 all: $(TARGETS)
 
