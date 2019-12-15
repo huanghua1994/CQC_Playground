@@ -59,11 +59,11 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
     energy_delta = nuc_energy;
     energy       = nuc_energy;
     iter = 0;
-
+    
     tic;
-    [natom, atom_xyz, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = shell_info_to_bf(nshell, shells);
-    [int_points, int_weights] = generate_integrate_weights_points(atom_xyz);
-    rho = calc_bf_value_at_int_points(int_points, atom_xyz, nbf, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim);
+    [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = shell_info_to_bf(nshell, shells);
+    [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num);
+    phi = eval_bf_at_int_point(ip, nbf, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim);
     ut = toc;
     fprintf('Precompute bf values at integral points = %.3f (s)\n', ut);
     
@@ -123,7 +123,7 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
         end
 
         % Construct the exchange-correlation matrix
-        XC = eval_Xalpha_XC_with_rho(natom, nbf, rho, int_weights, D);
+        XC = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D);
         
         %J = (J + J') / 2;  % The complete Coulomb matrix
         %K = (K + K') / 2;  % The complete exchange matrix

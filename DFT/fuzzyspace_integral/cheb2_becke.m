@@ -1,4 +1,4 @@
-function [rad_r, rad_w] = my_cheb2_becke(n, rm)
+function [rad_r, rad_w] = cheb2_becke(n, rm)
 % Ref: [JCP 88, 2547], doi: 10.1063/1.454033
 % Input parameters:
 %   n  : Number of points on the radial direction

@@ -1,4 +1,4 @@
-function [natom, atom_xyz, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = shell_info_to_bf(nshell, shells)
+function [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = shell_info_to_bf(nshell, shells)
 % Convert shell array into multiple arrays of basis function info
 % Input parameters:
 %   nshell : Total number of shells
@@ -6,6 +6,7 @@ function [natom, atom_xyz, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = she
 % Output parameters:
 %   natom     : Number of atoms
 %   atom_xyz  : Size natom*3, atom coordinates
+%   atom_num  : 
 %   bf_coef   : Size nbf*max_nprim, coef terms of basis functions
 %   bf_alpha  : Size nbf*max_nprim, alpha terms of basis functions
 %   bf_exp    : Size nbf*3, polynomial exponents terms of basis functions
@@ -14,11 +15,21 @@ function [natom, atom_xyz, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = she
     
     natom = max([shells.atom_ind]);
     atom_xyz = zeros(natom, 3);
+    atom_num = zeros(natom, 1);
     for i = 1 : nshell
         ind = shells(i).atom_ind;
         atom_xyz(ind, 1) = shells(i).x;
         atom_xyz(ind, 2) = shells(i).y;
         atom_xyz(ind, 3) = shells(i).z;
+        if (shells(i).atom_sym == 'H'), atom_num(ind) =  1; end
+        if (shells(i).atom_sym == 'C'), atom_num(ind) =  6; end
+        if (shells(i).atom_sym == 'N'), atom_num(ind) =  7; end
+        if (shells(i).atom_sym == 'O'), atom_num(ind) =  8; end
+        if (shells(i).atom_sym == 'P'), atom_num(ind) = 15; end
+        if (shells(i).atom_sym == 'S'), atom_num(ind) = 16; end
+    end
+    if (min(atom_num) == 0)
+        fprintf('FATAL: Some atoms are not in shell_info_to_bf.m\n');
     end
 
     nbf = 0; max_nprim = 0;
