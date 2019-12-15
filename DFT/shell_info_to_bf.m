@@ -62,7 +62,7 @@ function [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_np
             end
             if (shells(i).am == 1)
                 bf_coef(j, :) = bf_coef(j, :) .* (2 * bf_alpha(j, :) / pi).^0.75;
-                bf_coef(j, :) = bf_coef(j, :) .* (bf_alpha(j, :) / pi).^0.5 * 2;
+                bf_coef(j, :) = bf_coef(j, :) .* bf_alpha(j, :).^0.5 * 2;
             end
             % Rest?
         end
