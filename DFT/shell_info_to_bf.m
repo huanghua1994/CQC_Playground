@@ -2,7 +2,7 @@ function [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_np
 % Convert shell array into multiple arrays of basis function info
 % Input parameters:
 %   nshell : Total number of shells
-%   shells : Array of shell structures 
+%   shells : Array of shell structures, shell be normalized
 % Output parameters:
 %   natom     : Number of atoms
 %   atom_xyz  : Size natom*3, atom coordinates
@@ -53,18 +53,6 @@ function [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_np
             bf_alpha(j, 1 : shell_nprim) = shells(i).alpha(1 : shell_nprim);
             bf_center(j, 1 : 3) = [shells(i).x, shells(i).y, shells(i).z];
             bf_nprim(j) = shell_nprim;
-        end
-        
-        % ??? From DFTfun, initialization_HF.m
-        for j = ibf : ibf + shell_nbf - 1
-            if (shells(i).am == 0)
-                bf_coef(j, :) = bf_coef(j, :) .* (2 * bf_alpha(j, :) / pi).^0.75;
-            end
-            if (shells(i).am == 1)
-                bf_coef(j, :) = bf_coef(j, :) .* (2 * bf_alpha(j, :) / pi).^0.75;
-                bf_coef(j, :) = bf_coef(j, :) .* bf_alpha(j, :).^0.5 * 2;
-            end
-            % Rest?
         end
 
         shell_am = shells(i).am; 

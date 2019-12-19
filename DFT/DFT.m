@@ -61,7 +61,10 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
     iter = 0;
     
     tic;
-    [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = shell_info_to_bf(nshell, shells);
+    % Normalize norm_shells for shell_info_to_bf() and eval_Xalpha_XC_with_phi()
+    % Don't use it in calculate_eri(), or the shells will be normalized again 
+    norm_shells = normalize_shell(shells);
+    [natom, atom_xyz, atom_num, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim] = shell_info_to_bf(nshell, norm_shells);
     [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num);
     phi = eval_bf_at_int_point(ip, nbf, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim);
     ut = toc;
