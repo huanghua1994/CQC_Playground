@@ -1,6 +1,5 @@
-function XC = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D)
+function [XC, Exc] = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D)
 % Evaluate XC matrix using Xalpha functional and phi
-% TODO: find references of formulas used in this function
 % Input parameters:
 %   nbf : Total number of basis functions
 %   phi : Values of basis function at integral points
@@ -8,11 +7,13 @@ function XC = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D)
 %   D   : Density matrix
 % Output parameter:
 %   XC  : Exchange-correlation matrix
+%   Exc : Exchange-correlation energy
 
     nintp = size(phi, 1);
     XC = zeros(nbf, nbf);
     
-    % rho_g = \sum_{u,v} phi_{g,u} * D_{u,v} * phi_{g,v} is the electron density 
+    % rho_g = \sum_{u,v} phi_{g,u} * D_{u,v} * phi_{g,v} is the electron density at g-th grid point
+    % Sanity check: \int rho(r) dr = sum(rho .* ipw) ~= total number of electron
     rho = zeros(nintp, 1);
     for i = 1 : nbf
         rho_j = zeros(nintp, 1);
@@ -21,21 +22,19 @@ function XC = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D)
         end
         rho = rho + phi(:, i) .* rho_j;
     end
+    rho = 2 .* rho;   % We use D = Cocc * Cocc' instead of D = 2 * Cocc * Cocc' outside, need to multiple 2
     
-    % Slater exchange energy: E_{XC} = \int -3/4 (3/pi)^(1/3) rho^(4/3) d rho
-    % libxc Slater exchange "kernel": exc[rho] = -3/4 (3/pi)^(1/3) rho^(1/3)
-    % libxc Xalpha kernel = 3/2 * alpha * exc[rho], alpha = 0.7 includes correlation
-    % The last 2^(1/3): we used D = C * C^T instead of D = 2 * C * C^T outside
-    exc = -0.7 * (9/8) * ((3/pi)^(1/3)) * rho.^(1/3) * 2^(1/3); 
-    
-    % The following code is doing: XC_{u,v} = \int exc * phi_u * phi_v d rho,
-    % but the formula should be XC_{u,v} = \int fp * phi_u * phi_v d rho, 
-    % where f = exc * rho, fp = \frac{\partial f}{\partial rho}. Why?
-    exc_w = exc .* ipw;
+    % Xalpha XC energy: Exc = -alpha * (9/8) * (3/pi)^(1/3) * \int rho(r)^(4/3) dr
+    % Xalpha XC potential: vxc(r) = \frac{\delta Exc}{\delta rho} = -alpha * (3/2) * (3*rho(r)/pi)^(1/3)
+    % XC_{u,v} = \int phi_u(r) * vxc(r) * phi_v(r) dr
+    vxc = -0.7 * (3/2) * ((3/pi)^(1/3)) * rho.^(1/3);
+    f   = -0.7 * (9/8) * ((3/pi)^(1/3)) * rho.^(4/3); 
+    Exc = sum(f .* ipw);
+    vxc_w = vxc .* ipw;
     for i = 1 : nbf
-        phi_i_exc_w = phi(:, i) .* exc_w;
+        phi_i_vxc_w = phi(:, i) .* vxc_w;
         for j = i : nbf
-            XC(i, j) = dot(phi_i_exc_w, phi(:, j));
+            XC(i, j) = dot(phi_i_vxc_w, phi(:, j));
             XC(j, i) = XC(i, j);
         end
     end

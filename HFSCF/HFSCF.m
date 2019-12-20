@@ -95,12 +95,12 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             for j = shell_bf_offsets(N) : shell_bf_offsets(N + 1) - 1
             for i = shell_bf_offsets(M) : shell_bf_offsets(M + 1) - 1
                 I = ERI(l - l0, k - k0, j - j0, i - i0);
-                J(i, j) = J(i, j) + 2 * coef(1) * D(k, l) * I;
-                J(k, l) = J(k, l) + 2 * coef(2) * D(i, j) * I;
-                K(i, k) = K(i, k) - coef(3) * D(j, l) * I;
-                K(j, k) = K(j, k) - coef(4) * D(i, l) * I;
-                K(i, l) = K(i, l) - coef(5) * D(j, k) * I;
-                K(j, l) = K(j, l) - coef(6) * D(i, k) * I;
+                J(i, j) = J(i, j) + coef(1) * D(k, l) * I;
+                J(k, l) = J(k, l) + coef(2) * D(i, j) * I;
+                K(i, k) = K(i, k) + coef(3) * D(j, l) * I;
+                K(j, k) = K(j, k) + coef(4) * D(i, l) * I;
+                K(i, l) = K(i, l) + coef(5) * D(j, k) * I;
+                K(j, l) = K(j, l) + coef(6) * D(i, k) * I;
             end
             end
             end
@@ -112,7 +112,7 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
         
         J = (J + J') / 2;  % The complete Coulomb matrix
         K = (K + K') / 2;  % The complete exchange matrix
-        F = Hcore + J + K;
+        F = Hcore + 2 * J - K;
         
         % Calculate energy
         prev_energy = energy;

@@ -125,22 +125,22 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
         end
         end
 
-        % Construct the exchange-correlation matrix
-        XC = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D);
-        
         %J = (J + J') / 2;  % The complete Coulomb matrix
         %K = (K + K') / 2;  % The complete exchange matrix
         %F = Hcore + 2 * J - K;
 
+        % Construct the exchange-correlation matrix
+        [XC, Exc] = eval_Xalpha_XC_with_phi(natom, nbf, phi, ipw, D);
+
         J = (J + J') / 2;
-        H = 2 * J + XC;
-        F = Hcore + H;
+        H = Hcore + 2 * J;
+        F = H + XC;
         
-        % Calculate energy
+        % Calculate energy, note: XC energy is not sum(sum(D.*XC))!!
         prev_energy = energy;
-        energy = sum(sum(D .* (Hcore + F + XC))) + nuc_energy;
+        energy = sum(sum(D .* (Hcore + H))) + Exc + nuc_energy;
         energy_delta = abs(energy - prev_energy);
-        if iter == 0 
+        if (iter == 0)
             energy_delta = nuc_energy; 
         else
             ene_del(iter) = energy_delta;
