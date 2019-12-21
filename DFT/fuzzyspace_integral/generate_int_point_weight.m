@@ -10,39 +10,41 @@ function [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num)
 
     rm = 1;         % A parameter used in my_cheb2_becke
     max_rad = 65;   % Maximum radial direction points
-    max_sph = 302;  % Maximum sphere points
+    max_ang = 302;  % Maximum sphere points
     
     natom = size(atom_xyz, 1);
-    ip    = zeros(max_rad * max_sph * natom, 3);
-    ipw   = zeros(max_rad * max_sph * natom, 1);
+    ip    = zeros(max_rad * max_ang * natom, 3);
+    ipw   = zeros(max_rad * max_ang * natom, 1);
     dist  = squareform(pdist(atom_xyz));
     cnt   = 0;
     for iatom = 1 : natom
         % (1) Prune grid points according to atom type
-        n_sph = max_sph;   % Do not prune sphere points yet
+        n_ang = max_ang;   
         n_rad = max_rad;
         if (atom_num(iatom) <= 10), n_rad = 50; end
         if (atom_num(iatom) <= 2),  n_rad = 35; end
+        [rad_r, rad_w] = cheb2_becke(n_rad, rm);
+        n_rad = length(rad_r);
+        rad_n_ang = NWChem_prune_grid(atom_num(iatom), n_ang, n_rad, rad_r);
+        nintp_atom = sum(rad_n_ang);
         
         % (2) Generate Lebedev points & weights and combine it
         %     with radial direction points & weights
-        Lebedev_pw = getLebedevSphere(n_sph);
-        [rad_r, rad_w] = cheb2_becke(n_rad, rm);
-        n_radcut  = sum(rad_r < 10); 
-        ip_atom   = zeros(n_radcut * n_sph, 3);
-        ipw_atom  = zeros(n_radcut * n_sph, 1);
-        Lebedev_p = [Lebedev_pw.x, Lebedev_pw.y, Lebedev_pw.z];
-        for ir = 1 : n_radcut
-            spos = (ir-1) * n_sph + 1;
-            epos = ir * n_sph;
-            ip_atom(spos : epos, 1 : 3) = Lebedev_p * rad_r(ir);
-            ipw_atom(spos : epos) = Lebedev_pw.w * rad_w(ir);
+        ip_atom  = zeros(nintp_atom, 3);
+        ipw_atom = zeros(nintp_atom, 1);
+        spos = 1;
+        for j = 1 : n_rad
+            Lebedev_pw = getLebedevSphere(rad_n_ang(j));
+            epos = spos + rad_n_ang(j) - 1;
+            ip_atom(spos : epos, 1) = Lebedev_pw.x * rad_r(j);
+            ip_atom(spos : epos, 2) = Lebedev_pw.y * rad_r(j);
+            ip_atom(spos : epos, 3) = Lebedev_pw.z * rad_r(j);
+            ipw_atom(spos : epos) = Lebedev_pw.w * rad_w(j);
+            spos = epos + 1;
         end
-        nintp_atom = n_radcut * n_sph;
         
         % (3) Calculate the mask tensor and the actual weights
         % W_mat(i, j, k): fuzzy weight of integral point i to atom pair (j, k)
-        % W_mat(i, j, k): 第 i 个积分节点关于原子对 (j, k) 的模糊划分权重
         W_mat = zeros(nintp_atom, natom, natom);
         % Shift the integral point to atom
         rnowx = ip_atom(:, 1) + atom_xyz(iatom, 1);
@@ -75,10 +77,7 @@ function [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num)
         
         % (4) Calculate the final integral weights
         % \prod_{k} W_mat(:, j, k) is the actual weight of integral points
-        % belonging to atom k. Normalizing it gives us the fuzzy weight. 
-        % 积分节点上第 j 个原子的实际权重等于在此处原子 j 与所有其他原子
-        % k 之前权重的乘积。归一化后得到以当前原子中心的积分格点属于当前
-        % 原子的模糊划分权重。
+        % belonging to atom k. Normalizing it gives us the fuzzy weight.
         pvec = ones(nintp_atom, natom);
         for i = 1 : natom  
             for j = 1 : natom     
