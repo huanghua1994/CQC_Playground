@@ -23,7 +23,7 @@ function [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num)
         n_rad = max_rad;
         if (atom_num(iatom) <= 10), n_rad = 50; end
         if (atom_num(iatom) <= 2),  n_rad = 35; end
-        [rad_r, rad_w] = cheb2_becke(n_rad, rm);
+        [rad_r, rad_w] = cheb2_becke(n_rad + 2, rm);
         n_rad = length(rad_r);
         rad_n_ang = NWChem_prune_grid(atom_num(iatom), n_ang, n_rad, rad_r);
         nintp_atom = sum(rad_n_ang);
@@ -39,7 +39,7 @@ function [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num)
             ip_atom(spos : epos, 1) = Lebedev_pw.x * rad_r(j);
             ip_atom(spos : epos, 2) = Lebedev_pw.y * rad_r(j);
             ip_atom(spos : epos, 3) = Lebedev_pw.z * rad_r(j);
-            ipw_atom(spos : epos) = Lebedev_pw.w * rad_w(j);
+            ipw_atom(spos : epos)   = Lebedev_pw.w * rad_w(j);
             spos = epos + 1;
         end
         
@@ -50,19 +50,18 @@ function [ip, ipw] = generate_int_point_weight(atom_xyz, atom_num)
         rnowx = ip_atom(:, 1) + atom_xyz(iatom, 1);
         rnowy = ip_atom(:, 2) + atom_xyz(iatom, 2);
         rnowz = ip_atom(:, 3) + atom_xyz(iatom, 3);
-        % Enumerate each atom pair (j, k)
+        dip = zeros(nintp_atom, natom);
         for jatom = 1 : natom 
             dxj = rnowx - atom_xyz(jatom, 1);
             dyj = rnowy - atom_xyz(jatom, 2);
             dzj = rnowz - atom_xyz(jatom, 3);
-            dij = sqrt(dxj.^2 + dyj.^2 + dzj.^2);
+            dip(:, jatom) = sqrt(dxj.^2 + dyj.^2 + dzj.^2);
+        end
+        % Enumerate each atom pair (j, k)
+        for jatom = 1 : natom 
             for katom = 1 : natom
                 if katom ~= jatom
-                    dxk = rnowx - atom_xyz(katom, 1);
-                    dyk = rnowy - atom_xyz(katom, 2);
-                    dzk = rnowz - atom_xyz(katom, 3);
-                    dik = sqrt(dxk.^2 + dyk.^2 + dzk.^2);
-                    smu = (dij - dik) / dist(jatom, katom);
+                    smu = (dip(:, jatom) - dip(:, katom)) / dist(jatom, katom);
                     
                     % s(d(i,j)) = 0.5 * (1 - p(p(p(d(i,j)))))
                     for k = 1 : 3
