@@ -5,7 +5,7 @@ function rad_n_ang = NWChem_prune_grid(nuc, n_ang, n_rad, rads)
 %   2. https://github.com/pyscf/pyscf/blob/master/pyscf/data/radii.py
 % Input parameters:
 %   nuc   : Nuclear charge
-%   n_ang : Maximun number of angular grids
+%   n_ang : Maximum number of angular grids
 %   n_rad : Number of radial grids
 %   rads  : Array, size n_rad, radial grid coordinates
 % Output parameter:

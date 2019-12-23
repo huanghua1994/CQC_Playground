@@ -20,6 +20,7 @@ function [rad_r, rad_w] = cheb2_becke(n, rm)
         rad_w(i+1) = radw;
     end
     % rad_w(1) = inf, discard it
-    rad_r = rad_r(end : -1 : 2);
-    rad_w = rad_w(end : -1 : 2);
+    % rad_w(end) = 0, discard it
+    rad_r = rad_r(end-1 : -1 : 2);
+    rad_w = rad_w(end-1 : -1 : 2);
 end
