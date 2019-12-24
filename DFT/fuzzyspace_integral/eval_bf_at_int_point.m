@@ -1,4 +1,4 @@
-function rho = eval_bf_at_int_point(ip, nbf, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim)
+function phi = eval_bf_at_int_point(ip, nbf, bf_coef, bf_alpha, bf_exp, bf_center, bf_nprim)
 % Evaluate the values of basis function at integral points
 % Input parameters:
 %   ip         : Integral point coordinates
@@ -9,10 +9,10 @@ function rho = eval_bf_at_int_point(ip, nbf, bf_coef, bf_alpha, bf_exp, bf_cente
 %   bf_center  : Center of basis functions
 %   bf_nprim   : Number of primitive functions in each basis function
 % Output parameter:
-%   rho(:, i): i-th basis function value at all integral points
+%   phi(:, i): i-th basis function value at all integral points
 
     nintp = size(ip, 1);
-    rho   = zeros(nintp, nbf);
+    phi   = zeros(nintp, nbf);
     for i = 1 : nbf
         bfx  = bf_center(i, 1);
         bfy  = bf_center(i, 2);
@@ -28,7 +28,7 @@ function rho = eval_bf_at_int_point(ip, nbf, bf_coef, bf_alpha, bf_exp, bf_cente
         d2   = dx2 + dy2 + dz2;
         
         for p = 1 : bf_nprim(i)
-            rho(:, i) = rho(:, i) + (bf_coef(i, p) .* poly) .* exp(-bf_alpha(i, p) * d2);
+            phi(:, i) = phi(:, i) + (bf_coef(i, p) .* poly) .* exp(-bf_alpha(i, p) * d2);
         end
     end
 end
