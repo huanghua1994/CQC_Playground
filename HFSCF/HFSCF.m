@@ -1,25 +1,26 @@
-function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_tol, build_density)
+function [F, ene_f, ene_d] = HFSCF(mol_file, max_iter, ene_d_tol, build_D)
 % Restrict HF-SCF
-% mol_file : molecule file
-% max_iter : maximum SCF iteration
-% ene_delta_tol : stop threshold of energy change
-% F : converged Fock matrix
-% final_energy  : converged energy, including the nuclear energy
-% energy_delta  : energy change in each step
-% build_density : 1 == diagonalization, 2 == purification, 3 == SP2  
+% Input parameters:
+%   mol_file  : molecule file
+%   max_iter  : maximum SCF iteration
+%   ene_d_tol : stop threshold of energy change
+%   build_D   : 1 == diagonalization, 2 == purification, 3 == SP2  
+% Output parameters:
+%   F     : converged Fock matrix
+%   ene_f : converged energy, including the nuclear energy
+%   ene_d : energy change in each step
 
-    if (nargin < 2) max_iter = 20;         end
-    if (nargin < 3) ene_delta_tol = 1e-10; end
-    if (nargin < 4) build_density = 3;     end
+    if (nargin < 2), max_iter  = 20;     end
+    if (nargin < 3), ene_d_tol = 1e-10;  end
+    if (nargin < 4), build_D   = 1;      end
 
     [Hcore, S, nbf, nelec, nuc_energy, shells, nshell, shell_bf_num, shell_bf_offsets] = load_mol(mol_file);
     
-    n_orb   = nelec / 2;
+    nocc   = floor(nelec / 2);
     scrtol2 = 1e-22;    % Square of shell quartet screening values
     
     % Compute X = S^{-1/2}
-    [U, D] = eig(S);
-    X = U * inv(sqrt(D)) * U';
+    X = inv(chol(S));
 
     F = zeros(nbf);  % Fock matrix
     D = zeros(nbf);  % Density matrix
@@ -29,7 +30,7 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
     F0 = zeros(nbf * nbf, max_diis); % previous X^T * F * X
     ndiis = 0;
     diis_bmax_id = 1;
-    diis_bmax = -9999999999999;
+    diis_bmax = -19241112;
     B = zeros(max_diis + 1) - 1;
     for i = 1 : max_diis + 1
         B(i, i) = 0;
@@ -49,14 +50,12 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
     end
     end
     
-    energy_delta = nuc_energy;
-    energy       = nuc_energy;
-    iter = 0;
-
-    use_purif = 1;
+    ene_d  = nuc_energy;
+    energy = nuc_energy;
+    iter   = 0;
     
     % SCF iterations
-    while (energy_delta > ene_delta_tol)
+    while (ene_d > ene_d_tol)
         tic;
     
         % Construct the Fock matrix
@@ -117,11 +116,11 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
         % Calculate energy
         prev_energy = energy;
         energy = sum(sum(D .* (Hcore + F))) + nuc_energy;
-        energy_delta = abs(energy - prev_energy);
+        ene_d = abs(energy - prev_energy);
         if iter == 0 
-            energy_delta = nuc_energy; 
+            ene_d = nuc_energy; 
         else
-            ene_del(iter) = energy_delta;
+            ene_del(iter) = ene_d;
             energys(iter) = energy;
         end
         
@@ -175,44 +174,38 @@ function [F, final_energy, energy_delta] = HFSCF(mol_file, max_iter, ene_delta_t
             F = X' * F * X;
         end
         
-        if (build_density == 1)  
-            % Diagonalize F' = C' * epsilon * C
+        if (build_D == 1)  
             [C, E] = eig(F);
-            
-            % Form C = X * C', C_{occ} and D
-            [~, index] = sort(diag(E));
-            C = X * C;
-            C_occ = C(:, index(1 : n_orb));
-            
-            % D = C_{occ} * C_{occ}^T
+            E = diag(E);
+            [~, index] = sort(E);
+            C = C(:, index);
+            E = E(index);
+            C_occ = C(:, 1 : nocc);
             D = C_occ * C_occ';
         end
-        if (build_density == 2)
-            [D, ~] = CanonicalPurification(F, nbf, n_orb);
-            D = X * D * X';
+        if (build_D == 2)
+            [D, ~] = CanonicalPurification(F, nbf, nocc);
         end
-        if (build_density == 3)
-            [D, ~] = SP2(F, nbf, n_orb);
-            D = X * D * X';
+        if (build_D == 3)
+            [D, ~] = SP2(F, nbf, nocc);
         end
-        if (build_density == 4)
-            [D, ~] = SSNS(F, nbf, n_orb);
-            D = X * D * X';
+        if (build_D == 4)
+            [D, ~] = SSNS(F, nbf, nocc);
         end
-        if (build_density == 5)
-            [D, ~] = McWeenyPurification(F, nbf, n_orb);
-            D = X * D * X';
+        if (build_D == 5)
+            [D, ~] = McWeenyPurification(F, nbf, nocc);
         end
+        D = X * D * X';
         
         iter_time = toc;
         
-        fprintf('Iteration %2d, energy = %d, energy delta = %d, time = %f\n', iter, energy, energy_delta, iter_time);
+        fprintf('Iteration %2d, energy = %d, energy delta = %d, time = %f\n', iter, energy, ene_d, iter_time);
         iter = iter + 1;
         if (iter > max_iter) 
             break;
         end
     end
 
-    final_energy = energy;
-    energy_delta = ene_del;
+    ene_f = energy;
+    ene_d = ene_del;
 end

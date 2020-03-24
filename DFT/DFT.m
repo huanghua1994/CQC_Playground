@@ -1,25 +1,24 @@
-function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
+function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_d_tol)
 % DFT calculation
 % Input parameters:
-%   mol_file : molecule file
-%   max_iter : maximum SCF iteration
-%   ene_delta_tol : stop threshold of energy change
+%   mol_file  : molecule file
+%   max_iter  : maximum SCF iteration
+%   ene_d_tol : stop threshold of energy change
 % Output parameters:
 %   F     : converged Fock matrix
 %   ene_f : converged energy, including the nuclear energy
 %   ene_d : energy change in each step
 
-    if (nargin < 2), max_iter = 20;         end
-    if (nargin < 3), ene_delta_tol = 1e-10; end
+    if (nargin < 2), max_iter = 20;     end
+    if (nargin < 3), ene_d_tol = 1e-10; end
 
     [Hcore, S, nbf, nelec, nuc_energy, shells, nshell, shell_bf_num, shell_bf_offsets] = load_mol(mol_file);
     
-    n_orb   = nelec / 2;
+    nocc   = floor(nelec / 2);
     scrtol2 = 1e-11 * 1e-11;    % Square of shell quartet screening values
     
     % Compute X = S^{-1/2}
-    [U, D] = eig(S);
-    X = U * inv(sqrt(D)) * U';
+    X = inv(chol(S));
 
     F = zeros(nbf);  % Fock matrix
     D = zeros(nbf);  % Density matrix
@@ -28,7 +27,7 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
     [C, E] = eig(Fprime);
     [~, index] = sort(diag(E));
     C = X * C;
-    C_occ = C(:, index(1 : n_orb));
+    C_occ = C(:, index(1 : nocc));
     D = C_occ * C_occ';
     
     max_diis = 10;
@@ -36,7 +35,7 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
     F0 = zeros(nbf * nbf, max_diis); % previous X^T * F * X
     ndiis = 0;
     diis_bmax_id = 1;
-    diis_bmax = -9999999999999;
+    diis_bmax = -19241112;
     B = zeros(max_diis + 1) - 1;
     for i = 1 : max_diis + 1
         B(i, i) = 0;
@@ -56,9 +55,9 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
     end
     end
     
-    energy_delta = nuc_energy;
-    energy       = nuc_energy;
-    iter = 0;
+    ene_d  = nuc_energy;
+    energy = nuc_energy;
+    iter   = 0;
     
     tic;
     % Normalize norm_shells for shell_info_to_bf() and eval_Xalpha_XC_with_phi()
@@ -71,7 +70,7 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
     fprintf('Precompute bf values at integral points = %.3f (s)\n', ut);
     
     % SCF iterations
-    while (energy_delta > ene_delta_tol)
+    while (ene_d > ene_d_tol)
         tic;
     
         % Construct the Fock matrix
@@ -139,11 +138,11 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
         % Calculate energy, note: XC energy is not sum(sum(D.*XC))!!
         prev_energy = energy;
         energy = sum(sum(D .* (Hcore + H))) + Exc + nuc_energy;
-        energy_delta = abs(energy - prev_energy);
+        ene_d = abs(energy - prev_energy);
         if (iter == 0)
-            energy_delta = nuc_energy; 
+            ene_d = nuc_energy; 
         else
-            ene_del(iter) = energy_delta;
+            ene_del(iter) = ene_d;
             energys(iter) = energy;
         end
         
@@ -201,13 +200,13 @@ function [F, ene_f, ene_d] = DFT(mol_file, max_iter, ene_delta_tol)
         % Form C = X * C', C_{occ} and D
         [~, index] = sort(diag(E));
         C = X * C;
-        C_occ = C(:, index(1 : n_orb));
+        C_occ = C(:, index(1 : nocc));
         % D = C_{occ} * C_{occ}^T
         D = C_occ * C_occ';
         
         iter_time = toc;
         
-        fprintf('Iteration %2d, energy = %d, energy delta = %d, time = %f\n', iter, energy, energy_delta, iter_time);
+        fprintf('Iteration %2d, energy = %d, energy delta = %d, time = %f\n', iter, energy, ene_d, iter_time);
         iter = iter + 1;
         if (iter > max_iter) 
             break;
