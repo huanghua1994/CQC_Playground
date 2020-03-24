@@ -195,11 +195,27 @@ function [F, ene_f, ene_d] = HFSCF(mol_file, max_iter, ene_d_tol, build_D)
         if (build_D == 5)
             [D, ~] = McWeenyPurification(F, nbf, nocc);
         end
+        if (build_D == 6)
+            if ((abs(ene_d) <= 0.1) && (mod(iter, 5) ~= 0))
+                C = pseudo_diag(nbf, nocc, C, E, F);
+                C_occ = C(:, 1 : nocc);
+                D = C_occ * C_occ';
+                fprintf('Iter %d used pseudo_diag\n', iter);
+            else
+                [C, E] = eig(F);
+                E = diag(E);
+                [~, index] = sort(E);
+                C = C(:, index);
+                E = E(index);
+                C_occ = C(:, 1 : nocc);
+                D = C_occ * C_occ';
+            end
+        end
         D = X * D * X';
         
         iter_time = toc;
         
-        fprintf('Iteration %2d, energy = %d, energy delta = %d, time = %f\n', iter, energy, ene_d, iter_time);
+        fprintf('Iteration %2d, energy = %.10e, energy delta = %d, time = %f\n', iter, energy, ene_d, iter_time);
         iter = iter + 1;
         if (iter > max_iter) 
             break;
